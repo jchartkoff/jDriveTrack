@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="src" path="src"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-net-3.3"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-math3-3.3"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/jackcess-2.0.6"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/jfreechart-1.0.19"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/jsc-1.0"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/jssc-2.8.0"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/swing-layout-1.0.3"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/swing-worker-1.1"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/worldwind-2.0.0"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-io-2.4"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-jci-1.1"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-logging-1.2"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-lang3-3.3.2"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-cli-1.2"/>
+	<classpathentry kind="output" path="bin"/>
+</classpath>
