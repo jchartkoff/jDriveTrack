@@ -1,20 +1,31 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <classpath>
 	<classpathentry kind="src" path="src"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-net-3.3"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-math3-3.3"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/jackcess-2.0.6"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-1.8"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-io-2.4"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-logging-1.2"/>
 	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/jfreechart-1.0.19"/>
 	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/jsc-1.0"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/jssc-2.8.0"/>
 	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/swing-layout-1.0.3"/>
 	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/swing-worker-1.1"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/jSSC-2.8.0-Release"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-cli-1.3.1"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-collections4-4.1"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-lang3-3.4"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-math3-3.5"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-net-3.4"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/jcommon-1.0.23"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/db-derby-10.12.1.1-bin"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/jTileDownloader"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/worldwind-2.0.0">
+		<attributes>
+			<attribute name="org.eclipse.jdt.launching.CLASSPATH_ATTR_LIBRARY_PATH_ENTRY" value="C:/Users/John/Dropbox/workspace/worldwind-2.0.0"/>
+		</attributes>
+		<accessrules>
+			<accessrule kind="accessible" pattern="*"/>
+		</accessrules>
+	</classpathentry>
 	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/worldwind-2.0.0"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-io-2.4"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-jci-1.1"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-logging-1.2"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-lang3-3.3.2"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-cli-1.2"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/velocity-1.7"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

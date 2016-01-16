@@ -3,6 +3,7 @@
 	<name>jDriveTrack</name>
 	<comment></comment>
 	<projects>
+		<project>worldwind</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>
