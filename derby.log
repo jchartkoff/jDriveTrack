@@ -1,10 +1,10 @@
 ----------------------------------------------------------------
-Sat Jan 09 06:05:02 EST 2016:
-Booting Derby version The Apache Software Foundation - Apache Derby - 10.12.1.1 - (1704137): instance a816c00e-0152-260f-8ec1-0000029a0068 
-on database directory C:\Users\John\drivetrack\data_files\20160109060459.sql with class loader sun.misc.Launcher$AppClassLoader@e2f2a 
+Sun Mar 20 06:21:08 EDT 2016:
+Booting Derby version The Apache Software Foundation - Apache Derby - 10.12.1.1 - (1704137): instance a816c00e-0153-938a-eb49-000000ca4f60 
+on database directory C:\Users\John\drivetrack\data\test27 with class loader sun.misc.Launcher$AppClassLoader@1d16e93 
 Loaded from file:/C:/Users/John/workspace/db-derby-10.12.1.1-bin/db-derby-10.12.1.1-bin/lib/derby.jar
 java.vendor=Oracle Corporation
-java.runtime.version=1.8.0_66-b18
+java.runtime.version=1.8.0_74-b02
 user.dir=C:\Users\John\Dropbox\workspace\jDriveTrack
 os.name=Windows 7
 os.arch=x86

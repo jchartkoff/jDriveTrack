@@ -27,5 +27,9 @@
 	</classpathentry>
 	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/worldwind-2.0.0"/>
 	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/velocity-1.7"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/joda-time-2.9.2"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.USER_LIBRARY/commons-codec-1.10"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/BulkFileRenamer"/>
+	<classpathentry combineaccessrules="false" kind="src" path="/jmapviewer-1.13"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

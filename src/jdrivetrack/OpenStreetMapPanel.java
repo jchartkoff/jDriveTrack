@@ -6,6 +6,7 @@ import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Point2D.Double;
@@ -16,6 +17,7 @@ import java.beans.PropertyChangeListener;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -27,10 +29,11 @@ import javax.swing.event.EventListenerList;
 
 import org.openstreetmap.fma.jtiledownloader.views.main.JTileDownloaderMainView;
 
-import events.JMVCommandEvent.COMMAND;
+import events.JMVCommandEvent.Command;
 import events.JMVCommandEvent;
 
 import interfaces.MapPolygon;
+import interfaces.MapPolyline;
 import interfaces.MapRectangle;
 import interfaces.ICoordinate;
 import interfaces.JMapViewerEventListener;
@@ -40,16 +43,24 @@ import interfaces.TileLoader;
 import interfaces.TileLoaderListener;
 import interfaces.TileSource;
 import interfaces.MapMarker.STYLE;
+
 import tilesources.OsmTileSource;
+import types.Coordinate;
+import types.GeoTile;
+import types.MapDimension;
+import types.StaticMeasurement;
+import types.Style;
+import types.TestTile;
+import types.Tile;
 
 public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cloneable, TileLoaderListener {
 	private static final long serialVersionUID = -1154235901605771509L;
 	
+	private static final int MAX_TILES_ACROSS_SCREEN = 80;
 	private static final Cursor DEFAULT_MAP_CURSOR = Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR);
 	private static final Point.Double DEFAULT_MAP_CENTER_LON_LAT = new Point.Double(-86,35);
     private static final Dimension PREFERRED_SIZE = new Dimension(800,600);
     private static final int DEFAULT_ZOOM = 6;
-    private static final Dimension DEFAULT_TILE_DIMENSIONS = new Dimension(256,256);
     private static final Dimension DEFAULT_PRINTER_PAGE_SIZE = new Dimension(1035,800);
     private static final String DEFAULT_TILE_CACHE_PATH = System.getProperty("user.home") + 
 		File.separator + "drivetrack" + File.separator + "cache";
@@ -59,13 +70,15 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
     
     private boolean displayShapes = true;
     private Color[] arcColors = null;
-    private List<String> compIndex = new ArrayList<String>();
+    private double arcTraceRadius;
+	private Color arcCursorColor;
+	private Color arcTraceColor;
+	private Color arcAsymptoteColor;
 	private int zoom = 6;
-    private Grid grid;
     private Point.Double mouseLonLat = new Point.Double(0.0,0.0);
 	private Point.Double upperLeftPoint = null;
 	private Point.Double lowerRightPoint = null;
-	private boolean showPolygons = false;
+	private boolean showTestTiles = false;
 	private boolean showQuads = false;
 	private boolean showSignalMarkers = false;
 	private boolean showLines = false;
@@ -83,26 +96,23 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	private boolean showTargetRing = false;
 	private boolean showMapImage = true;
 	private boolean awaitingArcColorSet = false;
-	private double gpsArrowSize = 30;
 	private double arcCursorRadius;
-	private double arcTraceRadius;
 	private double arcIntersectPointRadius;
-	private double signalMarkerRadius;
-	private Color arcCursorColor;
-	private Color arcTraceColor;
-	private Color arcAsymptoteColor;
 	private Color arcIntersectPointColor;
-	private Arrow gpsArrow;
-	private MarkerArrayLayer signalMarkerLayer;
-	private MarkerArrayLayer arcIntersectPointLayer;
-	private PolygonArrayLayer polygonLayer;
-	private List<Line> lineList = new ArrayList<Line>(128);
+	private MapPolylineImpl gpsArrow;
 	private MapMarkerCircle targetRing;
 	private MapMarkerDot gpsDot;
-	private List<MapMarker> ringList;
-	private List<Quad> quadList;
+	
+	private List<HyperbolicProjection> arcList;
+	private List<MapMarkerCircle> arcIntersectList;
+	private List<MapPolylineImpl> lineList;	
+	private List<MapMarkerCircle> signalMarkerList;
+	private List<MapMarkerCircle> ringList;
+	private List<MapRectangleImpl> quadList;
+	private List<MapPolygonImpl> testTileList;
+	private List<MapRectangleImpl> gridLines;
 	private List<Icon> iconList = new ArrayList<Icon>(128);
-	private List<HyperbolicProjection> arcList = new ArrayList<HyperbolicProjection>(128);
+
 	private Point mousePosition = new Point(0,0);
     private ProgressMonitor progressMonitor;
     private Dimension frameSize = PREFERRED_SIZE;
@@ -117,25 +127,35 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
     private TileCache tileCache;
     private AttributionSupport attribution = new AttributionSupport();
     private EventListenerList evtListenerList = new EventListenerList();
-    private Double gridReferencePoint = new Point.Double(0,0);
+    private Point.Double gridReference = null;
+    private Point.Double tileSize = null;
+    private Point.Double gridSize = null;
+    private Color gridColor = Color.RED;
+    
+    private int ringIndex = -1;
+    private int quadIndex = -1;
+    private int lineIndex = -1;
+    private int arcIndex = -1;
+    private int signalMarkerIndex = -1;
+    private int iconIndex = -1;
     
     public OpenStreetMapPanel() {
-        this(DEFAULT_MAP_CENTER_LON_LAT, DEFAULT_ZOOM, PREFERRED_SIZE, DEFAULT_TILE_DIMENSIONS, DEFAULT_TILE_CACHE_PATH);
+        this(DEFAULT_MAP_CENTER_LON_LAT, DEFAULT_ZOOM, PREFERRED_SIZE, DEFAULT_TILE_CACHE_PATH);
     }
 
     public OpenStreetMapPanel(Dimension frameSize) {
-    	this(DEFAULT_MAP_CENTER_LON_LAT, DEFAULT_ZOOM, frameSize, DEFAULT_TILE_DIMENSIONS, DEFAULT_TILE_CACHE_PATH);
+    	this(DEFAULT_MAP_CENTER_LON_LAT, DEFAULT_ZOOM, frameSize, DEFAULT_TILE_CACHE_PATH);
     }
     
     public OpenStreetMapPanel(Point.Double centerLonLat, int zoom) {
-    	this(centerLonLat, zoom, PREFERRED_SIZE, DEFAULT_TILE_DIMENSIONS, DEFAULT_TILE_CACHE_PATH);
+    	this(centerLonLat, zoom, PREFERRED_SIZE, DEFAULT_TILE_CACHE_PATH);
     }
     
     public OpenStreetMapPanel(Point.Double centerLonLat, int zoom, Dimension frameSize) {
-    	this(centerLonLat, zoom, frameSize, DEFAULT_TILE_DIMENSIONS, DEFAULT_TILE_CACHE_PATH);
+    	this(centerLonLat, zoom, frameSize, DEFAULT_TILE_CACHE_PATH);
     }
     
-    public OpenStreetMapPanel(Point.Double centerLonLat, int zoom, Dimension frameSize, Dimension tileSize, String tileCachePath) {
+    public OpenStreetMapPanel(Point.Double centerLonLat, int zoom, Dimension frameSize, String tileCachePath) {
     	this.zoom = zoom;
         this.frameSize = frameSize;
         this.centerLonLat = centerLonLat;
@@ -152,7 +172,7 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 		setCursor(DEFAULT_MAP_CURSOR);
 		fsInsets = new Dimension(this.frameSize.width - 2, this.frameSize.height - 2);
 		tileSource = new OsmTileSource.Mapnik();
-		tileCache = new TileCache();
+		tileCache = new TileCache(new File(tileCachePath));
 		tileController = new TileController(tileSource, tileCache, this);
 		tileLoader = new OsmTileLoader(this);
 		tileController.setTileLoader(tileLoader);
@@ -167,10 +187,10 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
         tileCache.addPropertyChangeListener(new PropertyChangeListener() {
         	@Override
         	public void propertyChange(PropertyChangeEvent event) {
-	            if (TileCache.RESTORED.equals(event.getPropertyName())) {
+	            if (TileCache.Progress.RESTORED.toString().equals(event.getPropertyName())) {
 	            	tileCacheReady(event);
 	            }
-	            if (TileCache.PROGRESS.equals(event.getPropertyName())) {
+	            if (TileCache.Progress.UPDATE.toString().equals(event.getPropertyName())) {
 	            	tileCacheProgress(event);
 	            }
         	}
@@ -182,6 +202,11 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
         progressMonitor.setMillisToPopup(0);
 
         tileCache.restoreDiskCache();
+    }
+    
+    @Override
+    public void clearCache() {
+    	tileCache.clear();
     }
     
     private void tileCacheReady(PropertyChangeEvent event) {
@@ -200,53 +225,50 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
     }
 
     private void tileCacheProgress(PropertyChangeEvent event) {
-    	if (progressMonitor.isCanceled()) {
-    		tileCache.cancel(false);
-			progressMonitor.close();
-    	} else {
-            int progress = (Integer) event.getNewValue();
-            progressMonitor.setProgress(progress);
-            progressMonitor.setNote(String.format("Completed %d%% of restore", progress));
-    	}
+    	SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+		    	if (progressMonitor.isCanceled()) {
+		    		tileCache.cancel();
+					progressMonitor.close();
+		    	} else {
+		            int progress = (Integer) event.getNewValue();
+		            progressMonitor.setProgress(progress);
+		            progressMonitor.setNote(String.format("Completed %d%% of restore", progress));
+		    	}
+            }
+    	});
     }
 
     private void addComponentLayers() {
-		Style gpsDotStyle = new Style(new Color(255, 0, 0, 128), new Color(255, 0, 0, 64), new BasicStroke(), new Font("Calibri", Font.BOLD, 12));
+		Style gpsDotStyle = new Style(new Color(255, 0, 0, 128), new Color(255, 0, 0, 64), new BasicStroke(), null);
 		gpsDot = new MapMarkerDot(new Coordinate(centerLonLat), 2, gpsDotStyle);
-		Style targetRingStyle = new Style(new Color(255, 0, 0, 128), new Color(255, 0, 0, 16), new BasicStroke(), new Font("Calibri", Font.BOLD, 12));
+		
+		Style gpsArrowStyle = new Style(new Color(255, 0, 0, 128), new Color(255, 0, 0, 64), new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_MITER), null);
+		gpsArrow = new MapPolylineImpl(null, null, null, gpsArrowStyle);
+
+		Style targetRingStyle = new Style(new Color(255, 0, 0, 128), new Color(255, 0, 0, 16), new BasicStroke(), null);
         targetRing = new MapMarkerCircle(null, null, new Coordinate(centerLonLat), 100, STYLE.FIXED, targetRingStyle);
-		
-		ringList = Collections.synchronizedList(new LinkedList<MapMarker>());
-		quadList = Collections.synchronizedList(new LinkedList<Quad>());
         
-        grid = new Grid(upperLeftPoint, lowerRightPoint, fsInsets, gridReferencePoint);
-
-        gpsArrow = new Arrow(upperLeftPoint, lowerRightPoint, gpsArrowSize, fsInsets);
-
-        signalMarkerLayer = new MarkerArrayLayer(upperLeftPoint, lowerRightPoint, fsInsets);
-    	arcIntersectPointLayer = new MarkerArrayLayer(upperLeftPoint, lowerRightPoint, fsInsets, 
-    		arcIntersectPointRadius, arcIntersectPointColor);
-    	polygonLayer = new PolygonArrayLayer(upperLeftPoint, lowerRightPoint, fsInsets);
-
-        compIndex.add("GPS_ARROW");
-        add(gpsArrow, 0);
-        
-        compIndex.add("SAMPLE_GRID");
-		add(grid, 1);
-
-		compIndex.add("SIGNAL_MARKERS");
-		add(signalMarkerLayer, 2);
-		
-		compIndex.add("ARC_INTERSECT_POINTS");
-		add(arcIntersectPointLayer, 3);
-		
-		compIndex.add("POLYGONS");
-		add(polygonLayer, 4);
+        arcList = Collections.synchronizedList(new LinkedList<HyperbolicProjection>());
+        arcIntersectList = Collections.synchronizedList(new LinkedList<MapMarkerCircle>());
+        signalMarkerList = Collections.synchronizedList(new LinkedList<MapMarkerCircle>());
+		ringList = Collections.synchronizedList(new LinkedList<MapMarkerCircle>());
+		quadList = Collections.synchronizedList(new LinkedList<MapRectangleImpl>());
+		testTileList = Collections.synchronizedList(new LinkedList<MapPolygonImpl>());
+		gridLines = Collections.synchronizedList(new LinkedList<MapRectangleImpl>());
+		lineList = Collections.synchronizedList(new LinkedList<MapPolylineImpl>());
     }
     
     @Override
     public void setGridColor(Color color) {
-    	grid.setColor(color);
+    	this.gridColor = color;
+    	if (gridLines == null) return;
+    	Style style = new Style(color, color, new BasicStroke(), new Font("Calibri", Font.BOLD, 12));
+		for (MapRectangleImpl gridLine : gridLines) {
+			gridLine.setStyle(style);
+		}
+    	repaint();
     }
 
     private void setDisplayPosition(ICoordinate to, int zoom) {
@@ -259,8 +281,7 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
     }
 
     private void setDisplayPosition(Point mapPoint, int x, int y, int zoom) {
-        if (zoom > tileController.getTileSource().getMaxZoom())
-            return;
+        if (zoom > tileController.getTileSource().getMaxZoom()) return;
 
         Point p = new Point();
         p.x = x - mapPoint.x + getWidth() / 2;
@@ -302,30 +323,11 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 
     	upperLeftPoint = new Point.Double(tempUL.getLon(), tempUL.getLat());
     	lowerRightPoint = new Point.Double(tempLR.getLon(), tempLR.getLat());
-    	
-    	grid.setCornerLonLat(upperLeftPoint, lowerRightPoint);
-
-    	gpsArrow.setCornerLonLat(upperLeftPoint, lowerRightPoint);
-    	signalMarkerLayer.setCornerLonLat(upperLeftPoint, lowerRightPoint);
-    	arcIntersectPointLayer.setCornerLonLat(upperLeftPoint, lowerRightPoint);
-    	polygonLayer.setCornerLonLat(upperLeftPoint, lowerRightPoint);
 
     	for (Icon tempIcon : iconList) {
     		tempIcon.setCornerLonLat(upperLeftPoint, lowerRightPoint);
     	}
-    	
-    	for (Line tempLine : lineList) {
-    		tempLine.setCornerLonLat(upperLeftPoint, lowerRightPoint);
-    	}
-    	
-    	for (HyperbolicProjection tempArc : arcList) {
-    		tempArc.setCornerLonLat(upperLeftPoint, lowerRightPoint);
-    	}
-    	
-    	for (Quad tempQuad : quadList) {
-    		tempQuad.setCornerLonLat(upperLeftPoint, lowerRightPoint);
-    	}
-    	
+
     	setIgnoreRepaint(false);
     	repaint();
     }
@@ -333,32 +335,16 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
     @Override
     public void displayShapes(boolean displayShapes) {
     	this.displayShapes = displayShapes;
-    	grid.setVisible(showGrid && displayShapes);
+    	
     	gpsDot.setVisible(displayShapes && showGpsSymbol);
     	gpsArrow.setVisible(displayShapes && showGpsSymbol);
     	targetRing.setVisible(displayShapes && showTargetRing);
-    	signalMarkerLayer.setVisible(displayShapes && showSignalMarkers);
-    	arcIntersectPointLayer.setVisible(displayShapes && showArcIntersectPoints);
-    	polygonLayer.setVisible(displayShapes && showPolygons);
+
+    	showArcIntersectPoints(displayShapes && showArcIntersectPoints);
     	
     	for (Icon tempIcon : iconList) {
     		tempIcon.setVisible(displayShapes && showIcons);
     		if (displayShapes && showIcons) tempIcon.showIconLabel(displayShapes && showIconLabels);
-    	}
-    	
-    	for (Line tempLine : lineList) {
-    		tempLine.setVisible(displayShapes && showLines);
-    	}
-
-    	for (HyperbolicProjection tempArc : arcList) {
-			tempArc.showArc(displayShapes && showArcs);
-			tempArc.showAsymptote(displayShapes && showArcAsymptotes);
-    		tempArc.showCursor(displayShapes && showArcCursors);
-    		tempArc.showTrace(displayShapes && showArcTraces);
-    	}
-    	
-    	for (Quad tempQuad : quadList) {
-    		tempQuad.setVisible(displayShapes && showQuads);
     	}
     	
     	repaint();
@@ -408,7 +394,7 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
         tileController.cancelOutstandingJobs();
         setDisplayPosition(mapPoint, zoomPos, zoom);
         redimensionMap();
-        this.fireJMVEvent(new JMVCommandEvent(COMMAND.ZOOM, this, zoom));
+        this.fireJMVEvent(new JMVCommandEvent(Command.ZOOM, this, zoom));
     }
 
     @Override
@@ -417,8 +403,8 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
     }
 
     private void zoomChanged(int oldZoom) {
-    	this.fireJMVEvent(new JMVCommandEvent(COMMAND.ZOOM_OUT_DISABLED, this, zoom <= tileController.getTileSource().getMinZoom()));
-    	this.fireJMVEvent(new JMVCommandEvent(COMMAND.ZOOM_IN_DISABLED, this, zoom >= tileController.getTileSource().getMaxZoom()));
+    	this.fireJMVEvent(new JMVCommandEvent(Command.ZOOM_OUT_DISABLED, this, zoom <= tileController.getTileSource().getMinZoom()));
+    	this.fireJMVEvent(new JMVCommandEvent(Command.ZOOM_IN_DISABLED, this, zoom >= tileController.getTileSource().getMaxZoom()));
     }
 
     @Override
@@ -444,14 +430,19 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	}
 
 	@Override
-	public void setGridSize(Point.Double gridSize) {
-		grid.setGridSize(gridSize);
-		polygonLayer.setTileSize(gridSize);
+	public void setTileSize(Point.Double tileSize) {
+		this.tileSize = tileSize;;
+		if (showGrid & tileSize != null && gridReference != null && gridSize != null && gridColor != null) {
+			gridLines.clear();
+			gridLines.addAll(buildGrid(tileSize, gridReference, gridSize, gridColor));
+			repaint();
+		}
+		repaint();
 	}
 
 	@Override
 	public Point.Double getGridSize() {
-		return grid.getGridSize();
+		return gridSize;
 	}
 
 	@Override
@@ -463,17 +454,22 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	@Override
 	public void showGrid(boolean showGrid) {
 		this.showGrid = showGrid;
-		grid.setVisible(showGrid && displayShapes);
+		if (showGrid & tileSize != null && gridReference != null && gridSize != null && gridColor != null) {
+			gridLines.clear();
+			gridLines.addAll(buildGrid(tileSize, gridReference, gridSize, gridColor));
+			repaint();
+		}
+		repaint();
 	}
 	
 	@Override
 	public boolean isShowTargetRing() {
 		return targetRing.isVisible();
 	}
-	
+
 	@Override
 	public boolean isShowGrid() {
-		return grid.isVisible();
+		return showGrid;
 	}
 	
 	@Override
@@ -517,40 +513,43 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 
 	@Override
 	public void deleteAllArcIntersectPoints() {
-		arcIntersectPointLayer.deleteAllMarkers();
-		for (int i = 0; i < compIndex.size(); i++) {
-			if (compIndex.get(i).contains("ARC_INTERSECT")) compIndex.remove(i);
-		}
+		arcIntersectList.clear();
+		repaint();
 	}
 	
 	@Override
 	public void deleteAllRings() {
 		ringList.clear();
+		ringIndex = -1;
+        repaint();
+	}
+	
+	@Override
+	public void deleteAllSignalMarkers() {
+		signalMarkerList.clear();
+		signalMarkerIndex = -1;
         repaint();
 	}
 	
 	@Override
 	public void deleteAllIcons() {
 		iconList.subList(0, iconList.size()).clear();
-		for (int i = 0; i < compIndex.size(); i++) {
-			if (compIndex.get(i).contains("ICON")) compIndex.remove(i);
-		}
+		iconIndex = -1;
+		repaint();
 	}
 	
 	@Override
 	public void deleteAllLines() {
 		lineList.subList(0, lineList.size()).clear();
-		for (int i = 0; i < compIndex.size(); i++) {
-			if (compIndex.get(i).contains("LINE")) compIndex.remove(i);
-		}
+		lineIndex = -1;
+		repaint();
 	}
 
 	@Override
 	public void deleteAllArcs() {
-		arcList.subList(0, arcList.size()).clear();
-		for (int i = 0; i < compIndex.size(); i++) {
-			if (compIndex.get(i).contains("ARC")) compIndex.remove(i);
-		}
+		arcList.clear();
+		arcIndex = -1;
+		repaint();
 	}
 
 	@Override
@@ -566,7 +565,25 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 		gpsDot.setColor(color);
 		gpsDot.setBackColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), 64));
 		gpsArrow.setColor(color);
+		gpsArrow.setBackColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), 64));
 		repaint();
+	}
+	
+	private List<ICoordinate> buildArrow(Point.Double point, double angle, double length) {
+		List<ICoordinate> coords = new ArrayList<ICoordinate>(5);
+		double meters = length * getMeterPerPixel();
+		Point.Double arrowTail = Vincenty.getVincentyDirect(point, angle + 180, meters).point;
+		Point.Double arrowLeft = Vincenty.getVincentyDirect(point, angle + 150, meters / 2).point;
+		Point.Double arrowRight = Vincenty.getVincentyDirect(point, angle + 210, meters / 2).point;
+		
+		coords.add(new Coordinate(arrowTail));
+		coords.add(new Coordinate(point));
+		coords.add(new Coordinate(arrowLeft));
+		coords.add(new Coordinate(point));
+		coords.add(new Coordinate(arrowRight));
+		coords.add(new Coordinate(point));
+		
+		return coords;
 	}
 	
 	@Override
@@ -581,8 +598,7 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 			gpsArrow.setVisible(false);
 		} else {
 			gpsArrow.setVisible(true);
-			gpsArrow.setLocation(point, angle);
-			gpsArrow.setArrowSize(radius);
+			gpsArrow.setPoints(buildArrow(point, angle, radius / 5));
 			gpsArrow.setColor(color);
 			gpsDot.setVisible(false);
 		}
@@ -592,7 +608,10 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	@Override
 	public void showTargetRing(boolean showTargetRing) {
 		this.showTargetRing = showTargetRing;
-		if (targetRing.isVisible() != showTargetRing) targetRing.setVisible(showTargetRing && displayShapes);
+		if (targetRing.isVisible() != showTargetRing) {
+			targetRing.setVisible(showTargetRing && displayShapes);
+			repaint();
+		}
 	}
 
 	@Override
@@ -611,7 +630,7 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	@Override
 	public void setGpsArrowColor(Color color) {
 		gpsArrow.setColor(color);
-		 repaint();
+		repaint();
 	}
 
 	@Override
@@ -626,7 +645,7 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 		targetRing.setRadius(radius);
 		repaint();
 	}
-	
+
 	@Override
 	public void setTargetRingColor(Color color) {
 		targetRing.setColor(color);
@@ -652,49 +671,54 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 
 	@Override
 	public void addArcIntersectPoint(Point.Double point, double radius, Color color) {
-		arcIntersectPointLayer.addMarker(point, radius, color);
+		Style style = new Style(color, color, new BasicStroke(), null);
+		MapMarkerCircle mmc = new MapMarkerCircle(null, null, new Coordinate(point), radius, STYLE.FIXED, style);
+		arcIntersectList.add(mmc);
 		repaint();
 	}
 
 	@Override
-	public void addLine(Point.Double p1, double angle, Color color) {
-		if (p1 == null || upperLeftPoint == null || lowerRightPoint == null || Math.abs(angle) >= 360 || color == null) return;
-		Line line = new Line(upperLeftPoint, lowerRightPoint, p1, angle, frameSize, color);
-		lineList.add(line);
-		compIndex.add("LINE " + Integer.toString(lineList.size() - 1));
-		add(line, compIndex.size() - 1);
+	public void addLine(Point.Double p1, double angle, double distance, Color color) {
+		Point.Double p2 = Vincenty.getVincentyDirect(p1, angle, distance).point;
+		addLine(p1, p2, color);
 	}
 	
 	@Override
 	public void addLine(Point.Double p1, Point.Double p2, Color color) {
-		if (p1 == null || p2 == null || upperLeftPoint == null || lowerRightPoint == null || color == null) return;
-		Line line = new Line(upperLeftPoint, lowerRightPoint, p1, p2, frameSize, color);
+		List<ICoordinate> coords = new ArrayList<ICoordinate>(2);
+		coords.add(new Coordinate(p1));
+		coords.add(new Coordinate(p2));
+		Style style = new Style(color, color, new BasicStroke(), null);
+		MapPolylineImpl line = new MapPolylineImpl(null, null, coords, style);
 		lineList.add(line);
-		compIndex.add("LINE " + Integer.toString(lineList.size() - 1));
-		add(line, compIndex.size() - 1);
+		lineIndex = lineList.size() - 1;
 	}
-
+	
 	@Override
 	public void addArc(ConicSection cone) {
+		addArc(cone.getSMA(), cone.getSMB(), cone.getUnit());
+	}
+	
+	@Override
+	public void addArc(StaticMeasurement sma, StaticMeasurement smb, int unit) {
 		Color traceColor;
 		Color arcColor;
 		if (arcColors != null && traceEqualsFlightColor) {
-			traceColor = arcColors[cone.getUnit()];
-			arcColor = arcColors[cone.getUnit()];
+			traceColor = arcColors[unit];
+			arcColor = arcColors[unit];
 		} else {
 			if (arcColors == null) awaitingArcColorSet = true;
 			traceColor = arcTraceColor;
 			arcColor = arcTraceColor;
 		}
-		HyperbolicProjection hyperbola = new HyperbolicProjection(upperLeftPoint, lowerRightPoint, 
-			cone, frameSize, arcColor, showArcs, arcAsymptoteColor, showArcAsymptotes, 
-			arcCursorRadius, arcCursorColor, showArcCursors, arcTraceRadius, showArcTraces);
+		HyperbolicProjection hyperbola = new HyperbolicProjection(sma, smb, unit, showArcs, arcColor, 
+				showArcAsymptotes, arcAsymptoteColor, showArcCursors, arcCursorColor, arcCursorRadius,  
+				showArcTraces, arcTraceColor, arcTraceRadius);
 		arcList.add(hyperbola);
+		arcIndex = arcList.size() - 1;
 		hyperbola.setTraceColor(traceColor);
-		compIndex.add("ARC " + Integer.toString(arcList.size() - 1));
-		add(hyperbola, compIndex.size() - 1);
 	}
-	
+
 	@Override
 	public void setArcAsymptoteColor(Color arcAsymptoteColor) {
 		this.arcAsymptoteColor = arcAsymptoteColor;
@@ -704,7 +728,7 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
     public void setArcColors(Color[] arcColors) {
     	for (int i = 0; i < arcColors.length; i++) {
     		for (int a = 0; a < arcList.size(); a++) {
-    			if (arcList.get(a).getConicSection().getUnit() == i) {
+    			if (arcList.get(a).getUnit() == i) {
     				arcList.get(a).setArcColor(arcColors[i]);
     			}
     		}
@@ -725,7 +749,7 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
     	}
 		for (int i = 0; i < arcColors.length; i++) {
     		for (int a = 0; a < arcList.size(); a++) {
-    			if (arcList.get(a).getConicSection().getUnit() == i) {
+    			if (arcList.get(a).getUnit() == i) {
     				if (traceEqualsFlightColor) {
     					arcList.get(a).setTraceColor(arcColors[i]);
     				} else {
@@ -738,30 +762,34 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	
 	@Override
 	public void setArcCursorColor(Color arcCursorColor) {
-		this.arcCursorColor = arcCursorColor;
+		for (HyperbolicProjection arc : arcList) {
+			arc.setCursorColor(arcCursorColor);
+		}
+		repaint();
 	}
 	
 	@Override
 	public void setArcTraceColor(Color arcTraceColor) {
-		this.arcTraceColor = arcTraceColor;
-		if (arcColors!= null && !traceEqualsFlightColor) {
-			for (int i = 0; i < arcList.size(); i++) {
-	    		arcList.get(i).setTraceColor(arcTraceColor);
-	    	}
+		for (HyperbolicProjection arc : arcList) {
+			arc.setTraceColor(arcTraceColor);
 		}
+		repaint();
 	}
 	
     @Override
     public void setArcIntersectPointColor(Color color) {
-    	arcIntersectPointLayer.setAllColors(color);
+    	for (HyperbolicProjection arc : arcList) {
+			arc.setCursorColor(arcCursorColor);
+		}
+		repaint();
     }
 
 	@Override
 	public void removeArc(int index) {
 		try {
 			arcList.remove(index);
-			remove(compIndex.indexOf("ARC " + Integer.toString(index)));
-			compIndex.remove("ARC " + Integer.toString(index));
+			arcIndex = index - 1;
+			repaint();
 		} catch (IndexOutOfBoundsException ex) {
 			ex.printStackTrace();
 		}
@@ -772,64 +800,178 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 		if (point == null || upperLeftPoint == null || lowerRightPoint == null) return;
 		Icon icon = new Icon(upperLeftPoint, lowerRightPoint, point, iconPath, identifier, frameSize);
 		iconList.add(icon);
-		compIndex.add("ICON " + Integer.toString(iconList.size() - 1));
-		add(icon, compIndex.size() - 1);
+		iconIndex = iconList.size() - 1;
 	}
 
 	@Override
 	public void moveIcon(int index, Point.Double point) {
 		try {
 			iconList.get(index).setLocation(point);
+			iconIndex = index;
 		} catch (IndexOutOfBoundsException ex) {
 			ex.printStackTrace();
 		}
 	}
-	
-	@Override
-	public void hideIcon(int index) {
-		try {
-			iconList.remove(index);
-			remove(compIndex.indexOf("ICON " + Integer.toString(index)));
-			compIndex.remove("ICON " + Integer.toString(index));
-		} catch (IndexOutOfBoundsException ex) {
-			ex.printStackTrace();
-		}
-	}
-	
+
 	@Override
     public void addRing(Point.Double coord, double radius, Color color) {
-		Style style = new Style(new Color(color.getRed(), color.getGreen(), color.getBlue(), 128), new Color(0,0,0,0), new BasicStroke(), new Font("Calibri", Font.BOLD, 12));
-		MapMarker ring = new MapMarkerCircle(null, null, new Coordinate(coord), radius, STYLE.FIXED, style);
+		Style style = new Style(color, new Color(0,0,0,0), 
+				new BasicStroke(), new Font("Calibri", Font.BOLD, 12));
+		MapMarkerCircle ring = new MapMarkerCircle(null, null, new Coordinate(coord), radius, STYLE.FIXED, style);
 		ringList.add(ring);
+		ringIndex = ringList.size() - 1;
+        repaint();
+    }
+	
+	@Override
+    public void addSignalMarker(Point.Double coord, Color color) {
+		addSignalMarker(coord, 2, color);
+    }
+	
+	@Override
+	public void addSignalMarker(Point.Double point, double signalMarkerRadius, Color color) {
+		Style style = new Style(color, color, new BasicStroke(), null);
+		MapMarkerCircle signalMarker = new MapMarkerCircle(null, null, new Coordinate(point), signalMarkerRadius, STYLE.FIXED, style);
+		signalMarkerList.add(signalMarker);
+		signalMarkerIndex = signalMarkerList.size() - 1;
         repaint();
     }
 	
 	@Override
     public void removeRing(int index) {
-        ringList.remove(index);
-        repaint();
+	    try {
+			ringList.remove(index);
+	        ringIndex = index - 1;
+	        repaint();
+		} catch (IndexOutOfBoundsException ex) {
+			ex.printStackTrace();
+		}
     }
 
 	@Override
 	public void deleteAllQuads() {
-		quadList.subList(0, quadList.size()).clear();
-		for (int i = 0; i < compIndex.size(); i++) {
-			if (compIndex.get(i).contains("QUAD")) compIndex.remove(i);
-		}
+		quadList.clear();
+		quadIndex = -1;
+		repaint();
 	}
 
 	@Override
 	public void addQuad(Point.Double point, Point.Double size, Color color) {
-		Quad quad = new Quad(upperLeftPoint, lowerRightPoint, point, size, frameSize, color);
+		Style style = new Style(color, color, new BasicStroke(), new Font("Calibri", Font.BOLD, 12));
+		MapRectangleImpl quad = new MapRectangleImpl(null, null, new Coordinate(point), 
+				new Coordinate(point.y - size.y, point.x + size.x), style);
 		quadList.add(quad);
-		compIndex.add("QUAD " + Integer.toString(quadList.size() - 1));
-		add(quad, compIndex.size() - 1);		
+		quadIndex = quadList.size() - 1;
 	}
-
+	
 	@Override
 	public void changeQuadColor(int index, Color color) {
 		try {
-			quadList.get(index).setQuadColor(color);
+			Style style = new Style(new Color(color.getRed(), color.getGreen(), color.getBlue(), 128), 
+					new Color(color.getRed(), color.getGreen(), color.getBlue(), 128), 
+					new BasicStroke(), new Font("Calibri", Font.BOLD, 12));
+			quadList.get(index).setStyle(style);
+			quadIndex = index;
+			repaint();
+		} catch (IndexOutOfBoundsException ex) {
+			ex.printStackTrace();
+		}
+	}
+	
+	@Override
+	public void deleteTestTile(TestTile testTile) {
+		Iterator<MapPolygonImpl> iter = testTileList.iterator();
+    	while(iter.hasNext()) {
+    		MapPolygonImpl testTileList = iter.next();
+    		if (testTile.getID() == testTileList.getID()) iter.remove();
+    	}
+		repaint();
+	}
+
+	@Override 
+	public void deleteCurrentArc() {
+		if (arcIndex > -1) {
+			deleteArc(arcIndex);
+		}
+	}
+	
+	@Override
+	public void deleteArc(int index) {
+		try {
+			arcList.remove(index);
+			arcIndex = index - 1;
+			repaint();
+		} catch (IndexOutOfBoundsException ex) {
+			ex.printStackTrace();
+		}
+	}
+
+	@Override 
+	public void deleteCurrentIcon() {
+		if (iconIndex > -1) {
+			deleteIcon(iconIndex);
+		}
+	}
+	
+	@Override
+	public void deleteIcon(int index) {
+		try {
+			iconList.remove(index);
+			iconIndex = index - 1;
+			repaint();
+		} catch (IndexOutOfBoundsException ex) {
+			ex.printStackTrace();
+		}
+	}
+	
+	@Override 
+	public void deleteCurrentRing() {
+		if (ringIndex > -1) {
+			deleteRing(ringIndex);
+		}
+	}
+	
+	@Override
+	public void deleteRing(int index) {
+		try {
+			ringList.remove(index);
+			ringIndex = index - 1;
+			repaint();
+		} catch (IndexOutOfBoundsException ex) {
+			ex.printStackTrace();
+		}
+	}
+	
+	@Override 
+	public void deleteCurrentQuad() {
+		if (quadIndex > -1) {
+			deleteQuad(quadIndex);
+		}
+	}
+	
+	@Override
+	public void deleteQuad(int index) {
+		try {
+			quadList.remove(index);
+			quadIndex = index - 1;
+			repaint();
+		} catch (IndexOutOfBoundsException ex) {
+			ex.printStackTrace();
+		}
+	}
+	
+	@Override 
+	public void deleteCurrentLine() {
+		if (lineIndex > -1) {
+			deleteLine(lineIndex);
+		}
+	}
+	
+	@Override
+	public void deleteLine(int index) {
+		try {
+			lineList.remove(index);
+			lineIndex = index - 1;
 			repaint();
 		} catch (IndexOutOfBoundsException ex) {
 			ex.printStackTrace();
@@ -837,14 +979,30 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	}
 
 	@Override
-	public void deletePolygon(int index) {
-		try {
-			polygonLayer.deletePolygon(index);
-		} catch (IndexOutOfBoundsException ex) {
-			ex.printStackTrace();
-		}
+	public int getCurrentLineIndex() {
+		return lineIndex;
 	}
-
+	
+	@Override
+	public int getCurrentRingIndex() {
+		return ringIndex;
+	}
+	
+	@Override
+	public int getCurrentQuadIndex() {
+		return quadIndex;
+	}
+	
+	@Override
+	public int getCurrentIconIndex() {
+		return iconIndex;
+	}
+	
+	@Override
+	public int getCurrentSignalMarkerIndex() {
+		return signalMarkerIndex;
+	}
+	
 	@Override
 	public int numberOfIcons() {
 		return iconList.size();
@@ -853,47 +1011,41 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	@Override
 	public void showArcs(boolean showArcs) {
 		this.showArcs = showArcs; 
-		for (HyperbolicProjection tempArc : arcList) {
-			tempArc.showArc(displayShapes && showArcs);
+		for (HyperbolicProjection arc : arcList) {
+			arc.showArc(displayShapes && showArcs);
     	}
 	}
 	
 	@Override
 	public void showArcTrace(boolean showArcTraces) {
 		this.showArcTraces = showArcTraces; 
-		for (HyperbolicProjection tempArc : arcList) {
-    		tempArc.showTrace(displayShapes && showArcTraces);
+		for (HyperbolicProjection arc : arcList) {
+    		arc.showTrace(displayShapes && showArcTraces);
     	}
 	}
 
 	@Override
 	public void showArcAsymptotes(boolean showArcAsymptotes) {
 		this.showArcAsymptotes = showArcAsymptotes; 
-		for (HyperbolicProjection tempArc : arcList) {
-			tempArc.showAsymptote(displayShapes && showArcAsymptotes);
+		for (HyperbolicProjection arc : arcList) {
+			arc.showAsymptote(displayShapes && showArcAsymptotes);
     	}
 	}
 	
 	@Override
 	public void showArcCursors(boolean showArcCursors) {
 		this.showArcCursors = showArcCursors; 
-		for (HyperbolicProjection tempArc : arcList) {
-    		tempArc.showCursor(displayShapes && showArcCursors);
-    	}
-	}
-	
-	@Override
-	public void showQuads(boolean showQuads) {
-		this.showQuads = showQuads;
-		for (Quad tempQuad : quadList) {
-    		tempQuad.setVisible(displayShapes && showQuads);
+		for (HyperbolicProjection arc : arcList) {
+    		arc.showCursor(displayShapes && showArcCursors);
     	}
 	}
 
 	@Override
 	public void showArcIntersectPoints(boolean showArcIntersectPoints) {
 		this.showArcIntersectPoints = showArcIntersectPoints;
-		arcIntersectPointLayer.setVisible(showArcIntersectPoints);
+		for (MapMarkerCircle point : arcIntersectList) {
+			point.setVisible(displayShapes && showArcIntersectPoints);
+		}
 	}
 	
 	@Override
@@ -907,14 +1059,24 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	@Override
 	public void showLines(boolean showLines) {
 		this.showLines = showLines;
-		for (Line tempLine : lineList) {
-    		tempLine.setVisible(displayShapes && showLines);
-    	}
+		repaint();
 	}
 
 	@Override
+	public void showQuads(boolean showQuads) {
+		this.showQuads = showQuads;
+		repaint();
+	}
+	
+	@Override
 	public void showRings(boolean showRings) {
 		this.showRings = showRings;
+		repaint();
+	}
+	
+	@Override
+	public void showSignalMarkers(boolean showSignalMarkers) {
+		this.showSignalMarkers = showSignalMarkers;
 		repaint();
 	}
 	
@@ -956,40 +1118,22 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	}
 
 	@Override
-	public void addSignalMarker(Double point, double signalMarkerRadius, Color color) {
-		signalMarkerLayer.addMarker(point, signalMarkerRadius, color);
+	public void deleteSignalMarker(int index) {
+		try {
+			signalMarkerList.remove(index);
+			signalMarkerIndex = index - 1;
+			repaint();
+		} catch (IndexOutOfBoundsException ex) {
+			ex.printStackTrace();
+		}
 	}
 
 	@Override
-	public void deleteAllSignalMarkers() {
-		signalMarkerLayer.deleteAllMarkers();
-	}
-
-	@Override
-	public void deleteSignalMarker(int index) throws IndexOutOfBoundsException {
-		signalMarkerLayer.deleteMarker(index);
-	}
-
-	@Override
-	public void hideLine(int index) throws IndexOutOfBoundsException {
-		lineList.remove(index);
-		 repaint();
-	}
-
-	@Override
-	public void deleteQuad(int index) throws IndexOutOfBoundsException {
-		quadList.remove(index);
-		 repaint();
-	}
-
-	@Override
-	public void showSignalMarkers(boolean showSignalMarkers) {
-		this.showSignalMarkers = showSignalMarkers;
-	}
-
-	@Override
-	public void setGpsSymbolPosition(Double point, int angle) {
-		gpsArrow.setLocation(point, angle);
+	public void setGpsSymbolPosition(Point.Double point, int angle) {
+		gpsDot.setLon(point.x);
+		gpsDot.setLat(point.y);
+		gpsArrow.setPoints(buildArrow(point, angle, gpsDot.getRadius() * 4));
+		repaint();
 	}
 
 	@Override
@@ -998,15 +1142,16 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	}
 
 	@Override
-	public void setGpsSymbolAngle(int gpsAngle) {
-		if (gpsAngle == 360) {
+	public void setGpsSymbolAngle(int angle) {
+		if (angle == 360) {
 			gpsDot.setVisible(showGpsSymbol);
 			gpsArrow.setVisible(false);
 		} else {
 			gpsArrow.setVisible(showGpsSymbol);
+			gpsArrow.setPoints(buildArrow(centerLonLat, angle, gpsDot.getRadius() * 4));
 			gpsDot.setVisible(false);
 		}
-		 repaint();
+		repaint();
 	}
 
 	@Override
@@ -1017,7 +1162,8 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	@Override
 	public void showBulkDownloaderPanel() {
 		SwingUtilities.invokeLater(new Runnable() {
-            public void run() {
+            @Override
+			public void run() {
                 try {
                     UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
                 } catch (Exception e) {}
@@ -1037,56 +1183,69 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	}
 
 	@Override
-	public void addArcIntersectPoints(List<Double> arcIntersectList) {
-		arcIntersectPointLayer.addMarkers(arcIntersectList, arcIntersectPointRadius, arcIntersectPointColor);
+	public void addArcIntersectPoints(List<Double> arcIntersectPoints) {
+		addArcIntersectPoints(arcIntersectPoints, arcIntersectPointRadius, arcIntersectPointColor);
 	}
 
 	@Override
-	public void setArcIntersectPoints(List<Double> arcIntersectList) {
-		arcIntersectPointLayer.deleteAllMarkers();
-		addArcIntersectPoints(arcIntersectList);
+	public void setArcIntersectPoints(List<Double> arcIntersectPoints) {
+		arcIntersectList.clear();
+		addArcIntersectPoints(arcIntersectPoints, arcIntersectPointRadius, arcIntersectPointColor);
 	}
 
 	@Override
-	public void addArcIntersectPoints(List<Double> iplist, double radius, Color color) {
-		arcIntersectPointLayer.addMarkers(iplist, radius, color);
+	public void addArcIntersectPoints(List<Double> arcIntersectPoints, double radius, Color color) {
+		Style style = new Style(color, color, new BasicStroke(), null);
+		for (Double ip : arcIntersectPoints) {
+			MapMarkerCircle mmc = new MapMarkerCircle(null, null, new Coordinate(ip), radius, STYLE.FIXED, style);
+			arcIntersectList.add(mmc);
+	        repaint();
+		}
 	}
 
 	@Override
-	public void setArcIntersectPoints(List<Double> iplist, double radius, Color color) {
-		arcIntersectPointLayer.deleteAllMarkers();
-		arcIntersectPointLayer.addMarkers(iplist, radius, color);
+	public void setArcIntersectPoints(List<Double> arcIntersectPoints, double radius, Color color) {
+		arcIntersectList.clear();
+		addArcIntersectPoints(arcIntersectPoints, radius, color);;
 	}
 
 	@Override
 	public void setQuadVisible(int index, boolean isVisible) {
-		quadList.get(index). setVisible(isVisible);
+		quadList.get(index).setVisible(isVisible);
+		quadIndex = index;
 	}
 
 	@Override
-	public void addPolygon(GeoTile geotile) {
-		polygonLayer.addPolygon(geotile.getPoint());
+	public void addTestTile(GeoTile geoTile, Color color, int id) {
+		Style style = new Style(color, color, new BasicStroke(), null);
+		MapPolygonImpl testTile = new MapPolygonImpl(null, null, geoTile.getCoordinates(), style, id);
+		testTileList.add(testTile);
+		repaint();
 	}
 
 	@Override
-	public void setPolygonVisible(int index, boolean isVisible) {
-		polygonLayer.setPolygonVisible(index, isVisible);
+	public void changeTestTileColor(TestTile testTile, Color color) throws IndexOutOfBoundsException {
+		try {
+			Style style = new Style(color, color, new BasicStroke(), null);
+			for (int i = 0; i < testTileList.size(); i++) {
+				if (testTileList.get(i).getID() == testTile.getID()) {
+					testTileList.get(i).setStyle(style);
+				}
+			}
+		} catch (IndexOutOfBoundsException ex) {
+			ex.printStackTrace();
+		}
 	}
 
 	@Override
-	public void changePolygonColor(int index, Color color) throws IndexOutOfBoundsException {
-		polygonLayer.setColor(index, color);
+	public void deleteAllTestTiles() {
+		testTileList.clear();
+		repaint();
 	}
 
 	@Override
-	public void deleteAllPolygons() {
-		polygonLayer.deleteAllPolygons();
-	}
-
-	@Override
-	public void showPolygons(boolean showPolygons) {
-		this.showPolygons = showPolygons;
-		polygonLayer.setVisible(showPolygons);
+	public void showTestTiles(boolean showTestTiles) {
+		this.showTestTiles = showTestTiles;
 	}
 	
 	@Override
@@ -1096,13 +1255,18 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 
 	@Override
 	public void setSignalMarkerRadius(double signalMarkerRadius) {
-		this.signalMarkerRadius = signalMarkerRadius;
-		signalMarkerLayer.setAllDiameters(signalMarkerRadius * 2);
+		for (int i = 0; i < signalMarkerList.size(); i++) {
+			signalMarkerList.get(i).setRadius(signalMarkerRadius);
+		}
+
 	}
 
 	@Override
 	public void setArcTraceRadius(double arcTraceRadius) {
-		this.arcTraceRadius = arcTraceRadius;
+		for (HyperbolicProjection arc : arcList) {
+			arc.setCursorRadius(arcTraceRadius);
+		}
+		repaint();
 	}
 
 	@Override
@@ -1111,8 +1275,8 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	}
 
 	@Override
-	public boolean isShowPolygons() {
-		return showPolygons;
+	public boolean isShowTestTiles() {
+		return showTestTiles;
 	}
 
 	@Override
@@ -1128,11 +1292,6 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	@Override
 	public boolean isShowArcIntersectPoints() {
 		return showArcIntersectPoints;
-	}
-
-	@Override
-	public void addSignalMarker(Point.Double point, Color color) {
-		signalMarkerLayer.addMarker(point, signalMarkerRadius, color);
 	}
 
 	@Override
@@ -1166,131 +1325,190 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
         center.x += x;
         center.y += y;
         repaint();
-        this.fireJMVEvent(new JMVCommandEvent(COMMAND.MOVE, this, true));
+        this.fireJMVEvent(new JMVCommandEvent(Command.MOVE, this, true));
     }
     
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
         if (center == null) return;
+        Graphics2D g2d = (Graphics2D) g.create();
+        try {
+	        int iMove = 0;
+	
+	        int tilesize = tileSource.getTileSize();
+	        int tilex = center.x / tilesize;
+	        int tiley = center.y / tilesize;
+	        int off_x = center.x % tilesize;
+	        int off_y = center.y % tilesize;
+	
+	        int w2 = getWidth() / 2;
+	        int h2 = getHeight() / 2;
+	        int posx = w2 - off_x;
+	        int posy = h2 - off_y;
+	
+	        int diff_left = off_x;
+	        int diff_right = tilesize - off_x;
+	        int diff_top = off_y;
+	        int diff_bottom = tilesize - off_y;
+	
+	        boolean start_left = diff_left < diff_right;
+	        boolean start_top = diff_top < diff_bottom;
+	
+	        if (start_top) {
+	            if (start_left) {
+	                iMove = 2;
+	            } else {
+	                iMove = 3;
+	            }
+	        } else {
+	            if (start_left) {
+	                iMove = 1;
+	            } else {
+	                iMove = 0;
+	            }
+	        } // calculate the visibility borders
+	        int x_min = -tilesize;
+	        int y_min = -tilesize;
+	        int x_max = getWidth();
+	        int y_max = getHeight();
+	
+	        // calculate the length of the grid (number of squares per edge)
+	        int gridLength = 1 << zoom;
+	
+	        // paint the tiles in a spiral, starting from center of the map
+	        boolean painted = true;
+	        int x = 0;
+	        while (painted) {
+	            painted = false;
+	            for (int i = 0; i < 4; i++) {
+	                if (i % 2 == 0) {
+	                    x++;
+	                }
+	                for (int j = 0; j < x; j++) {
+	                    if (x_min <= posx && posx <= x_max && y_min <= posy && posy <= y_max) {
+	                        // tile is visible
+	                        Tile tile;
+	                        if (scrollWrapEnabled) {
+	                            // in case tilex is out of bounds, grab the tile to use for wrapping
+	                            int tilexWrap = ((tilex % gridLength) + gridLength) % gridLength;
+	                            tile = tileController.getTile(tilexWrap, tiley, zoom);
+	                        } else {
+	                            tile = tileController.getTile(tilex, tiley, zoom);
+	                        }
+	                        if (tile != null) {
+	                            tile.paint(g2d, posx, posy, tilesize, tilesize);
+	                            if (tileGridVisible) {
+	                                g2d.drawRect(posx, posy, tilesize, tilesize);
+	                            }
+	                        }
+	                        painted = true;
+	                    }
+	                    Point p = move[iMove];
+	                    posx += p.x * tilesize;
+	                    posy += p.y * tilesize;
+	                    tilex += p.x;
+	                    tiley += p.y;
+	                }
+	                iMove = (iMove + 1) % move.length;
+	            }
+	        }
+	        // outer border of the map
+	        int mapSize = tilesize << zoom;
+	        if (scrollWrapEnabled) {
+	            g2d.drawLine(0, h2 - center.y, getWidth(), h2 - center.y);
+	            g2d.drawLine(0, h2 - center.y + mapSize, getWidth(), h2 - center.y + mapSize);
+	        } else {
+	            g2d.drawRect(w2 - center.x, h2 - center.y, mapSize, mapSize);
+	        }
+	
+	        // keep x-coordinates from growing without bound if scroll-wrap is enabled
+	        if (scrollWrapEnabled) {
+	            center.x = center.x % mapSize;
+	        }
+	        
+	        if (showQuads && quadList != null && displayShapes) {
+	            synchronized (quadList) {
+	                for (MapRectangle quad : quadList) {
+	                    if (quad.isVisible())
+	                        paintRectangle(g2d, quad);
+	                }
+	            }
+	        }
+	        
+	        if (showTestTiles && testTileList != null && displayShapes) {
+	            synchronized (testTileList) {
+	                for (MapPolygon testTile : testTileList) {
+	                    if (testTile.isVisible())
+	                        paintPolygon(g2d, testTile);
+	                }
+	            }
+	        }
+	
+	        if (showGrid && gridLines != null && tilesAcrossScreen(gridSize) < MAX_TILES_ACROSS_SCREEN && displayShapes) {
+	            synchronized (gridLines) {
+	                for (MapRectangle gridLine : gridLines) {
+	                    paintRectangle(g2d, gridLine);
+	                }
+	            }
+	        }
+	        
+	        if (showRings && ringList != null && displayShapes) {
+	            synchronized (ringList) {
+	                for (MapMarker marker : ringList) {
+	                    if (marker.isVisible())
+	                        paintMarker(g2d, marker);
+	                }
+	            }
+	        }
+	        
+	        if (showSignalMarkers && signalMarkerList != null && displayShapes) {
+	            synchronized (signalMarkerList) {
+	                for (MapMarker marker : signalMarkerList) {
+	                    if (marker.isVisible())
+	                        paintMarker(g2d, marker);
+	                }
+	            }
+	        }
+	        
+	        if (showArcs && arcList != null && displayShapes) {
+	            synchronized (arcList) {
+	                for (HyperbolicProjection arc : arcList) {
+	                    paintHyperbola(g2d, arc);
+	                }
+	            }
+	        }
+	
+	        if (showGpsSymbol && gpsDot != null && displayShapes) {
+	        	synchronized (gpsDot) {
+	                if (gpsDot.isVisible()) paintMarker(g2d, gpsDot);
+	                if (gpsArrow.isVisible()) paintPolyline(g2d, gpsArrow);
+	            }
+	        }
+	        
+	        if (showTargetRing && targetRing != null && displayShapes) {
+	        	synchronized (targetRing) {
+	                if (targetRing.isVisible()) paintMarker(g2d, targetRing);
+	            }
+	        }
+	        
+	        if (showLines && lineList != null && displayShapes) {
+	            synchronized (lineList) {
+	                for (MapPolylineImpl polyline : lineList) {
+	                    if (polyline.isVisible())
+	                        paintPolyline(g2d, polyline);
+	                }
+	            }
+	        }
+	        
+	        attribution.paintAttribution(g2d, getWidth(), getHeight(), getPosition(0, 0), getPosition(getWidth(), getHeight()), zoom, this);
+	    
+        } finally {
+	    	g2d.dispose();
+	    }
         
-        int iMove = 0;
-
-        int tilesize = tileSource.getTileSize();
-        int tilex = center.x / tilesize;
-        int tiley = center.y / tilesize;
-        int off_x = center.x % tilesize;
-        int off_y = center.y % tilesize;
-
-        int w2 = getWidth() / 2;
-        int h2 = getHeight() / 2;
-        int posx = w2 - off_x;
-        int posy = h2 - off_y;
-
-        int diff_left = off_x;
-        int diff_right = tilesize - off_x;
-        int diff_top = off_y;
-        int diff_bottom = tilesize - off_y;
-
-        boolean start_left = diff_left < diff_right;
-        boolean start_top = diff_top < diff_bottom;
-
-        if (start_top) {
-            if (start_left) {
-                iMove = 2;
-            } else {
-                iMove = 3;
-            }
-        } else {
-            if (start_left) {
-                iMove = 1;
-            } else {
-                iMove = 0;
-            }
-        } // calculate the visibility borders
-        int x_min = -tilesize;
-        int y_min = -tilesize;
-        int x_max = getWidth();
-        int y_max = getHeight();
-
-        // calculate the length of the grid (number of squares per edge)
-        int gridLength = 1 << zoom;
-
-        // paint the tiles in a spiral, starting from center of the map
-        boolean painted = true;
-        int x = 0;
-        while (painted) {
-            painted = false;
-            for (int i = 0; i < 4; i++) {
-                if (i % 2 == 0) {
-                    x++;
-                }
-                for (int j = 0; j < x; j++) {
-                    if (x_min <= posx && posx <= x_max && y_min <= posy && posy <= y_max) {
-                        // tile is visible
-                        Tile tile;
-                        if (scrollWrapEnabled) {
-                            // in case tilex is out of bounds, grab the tile to use for wrapping
-                            int tilexWrap = ((tilex % gridLength) + gridLength) % gridLength;
-                            tile = tileController.getTile(tilexWrap, tiley, zoom);
-                        } else {
-                            tile = tileController.getTile(tilex, tiley, zoom);
-                        }
-                        if (tile != null) {
-                            tile.paint(g, posx, posy, tilesize, tilesize);
-                            if (tileGridVisible) {
-                                g.drawRect(posx, posy, tilesize, tilesize);
-                            }
-                        }
-                        painted = true;
-                    }
-                    Point p = move[iMove];
-                    posx += p.x * tilesize;
-                    posy += p.y * tilesize;
-                    tilex += p.x;
-                    tiley += p.y;
-                }
-                iMove = (iMove + 1) % move.length;
-            }
-        }
-        // outer border of the map
-        int mapSize = tilesize << zoom;
-        if (scrollWrapEnabled) {
-            g.drawLine(0, h2 - center.y, getWidth(), h2 - center.y);
-            g.drawLine(0, h2 - center.y + mapSize, getWidth(), h2 - center.y + mapSize);
-        } else {
-            g.drawRect(w2 - center.x, h2 - center.y, mapSize, mapSize);
-        }
-
-        // keep x-coordinates from growing without bound if scroll-wrap is enabled
-        if (scrollWrapEnabled) {
-            center.x = center.x % mapSize;
-        }
-        
-        if (showRings && ringList != null) {
-            synchronized (ringList) {
-                for (MapMarker marker : ringList) {
-                    if (marker.isVisible())
-                        paintMarker(g, marker);
-                }
-            }
-        }
-        
-        if (showGpsSymbol && gpsDot != null) {
-        	synchronized (gpsDot) {
-                if (gpsDot.isVisible()) paintMarker(g, gpsDot);
-            }
-        }
-        
-        if (showTargetRing && targetRing != null) {
-        	synchronized (targetRing) {
-                if (targetRing.isVisible()) paintMarker(g, targetRing);
-            }
-        }
-
-        attribution.paintAttribution(g, getWidth(), getHeight(), getPosition(0, 0), getPosition(getWidth(), getHeight()), zoom, this);
     }
-
+    
 	@Override
 	public void tileLoadingFinished(Tile tile, boolean success) {
 		tile.setLoaded(success);
@@ -1338,7 +1556,13 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
         return mDistance / pDistance;
     }
 	
-    private void paintMarker(Graphics g, MapMarker marker) {
+	private void paintMarkers(Graphics2D g, List<MapMarkerCircle> markers) {
+		for (MapMarkerCircle marker : markers) {
+			paintMarker(g, marker);
+		}
+	}
+	
+    private void paintMarker(Graphics2D g, MapMarker marker) {
         Point p = getMapPosition(marker.getLat(), marker.getLon(), marker.getMarkerStyle() == MapMarker.STYLE.FIXED);
         Integer radius = getRadius(marker, p);
         if (scrollWrapEnabled) {
@@ -1368,7 +1592,7 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
         }
     }
     
-    protected void paintRectangle(Graphics g, MapRectangle rectangle) {
+    protected void paintRectangle(Graphics2D g, MapRectangle rectangle) {
         Coordinate topLeft = rectangle.getTopLeft();
         Coordinate bottomRight = rectangle.getBottomRight();
         if (topLeft != null && bottomRight != null) {
@@ -1402,8 +1626,8 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
         }
     }
 
-    protected void paintPolygon(Graphics g, MapPolygon polygon) {
-        List<? extends ICoordinate> coords = polygon.getPoints();
+    protected void paintPolygon(Graphics2D g, MapPolygon testTile) {
+        List<? extends ICoordinate> coords = testTile.getPoints();
         if (coords != null && coords.size() >= 3) {
             List<Point> points = new LinkedList<>();
             for (ICoordinate c : coords) {
@@ -1413,7 +1637,7 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
                 }
                 points.add(p);
             }
-            polygon.paint(g, points);
+            testTile.paint(g, points);
             if (scrollWrapEnabled) {
                 int tilesize = tileSource.getTileSize();
                 int mapSize = tilesize << zoom;
@@ -1426,7 +1650,7 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
                             keepWrapping = false;
                         }
                     }
-                    polygon.paint(g, pointsWrapped);
+                    testTile.paint(g, pointsWrapped);
                 }
                 pointsWrapped = new LinkedList<>(points);
                 keepWrapping = true;
@@ -1437,12 +1661,61 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
                             keepWrapping = false;
                         }
                     }
-                    polygon.paint(g, pointsWrapped);
+                    testTile.paint(g, pointsWrapped);
                 }
             }
         }
     }
-
+    
+    protected void paintHyperbola(Graphics2D g, HyperbolicProjection hyperbola) {
+    	if (hyperbola.showArc()) paintPolyline(g, hyperbola.getArcPolyline());
+    	if (hyperbola.showTrace()) paintPolyline(g, hyperbola.getTracePolyline());
+    	if (hyperbola.showAsymptote()) paintPolyline(g, hyperbola.getAsymptotePolyline()); 
+    	if (hyperbola.showTrace()) paintMarkers(g, hyperbola.getTraceMarkers());
+    	if (hyperbola.showCursors()) paintMarkers(g, hyperbola.getCursorMarkers());
+    }
+    
+    protected void paintPolyline(Graphics2D g, MapPolyline polyline) {
+        List<? extends ICoordinate> coords = polyline.getPoints();
+        if (coords != null && coords.size() >= 3) {
+            List<Point> points = new LinkedList<>();
+            for (ICoordinate c : coords) {
+                Point p = getMapPosition(c, false);
+                if (p == null) {
+                    return;
+                }
+                points.add(p);
+            }
+            polyline.paint(g, points);
+            if (scrollWrapEnabled) {
+                int tilesize = tileSource.getTileSize();
+                int mapSize = tilesize << zoom;
+                List<Point> pointsWrapped = new LinkedList<>(points);
+                boolean keepWrapping = true;
+                while (keepWrapping) {
+                    for (Point p : pointsWrapped) {
+                        p.x -= mapSize;
+                        if (p.x < 0) {
+                            keepWrapping = false;
+                        }
+                    }
+                    polyline.paint(g, pointsWrapped);
+                }
+                pointsWrapped = new LinkedList<>(points);
+                keepWrapping = true;
+                while (keepWrapping) {
+                    for (Point p : pointsWrapped) {
+                        p.x += mapSize;
+                        if (p.x > getWidth()) {
+                            keepWrapping = false;
+                        }
+                    }
+                    polyline.paint(g, pointsWrapped);
+                }
+            }
+        }
+    }
+    
     private Point getMapPosition(double lat, double lon, boolean checkOutside) {
         Point p = tileSource.latLonToXY(lat, lon, zoom);
         p.translate(-(center.x - getWidth() / 2), -(center.y - getHeight() /2));
@@ -1492,9 +1765,156 @@ public class OpenStreetMapPanel extends JLayeredPane implements MapInterface, Cl
 	}
 
 	@Override
-	public void setGridReference(Double gridReference) {
-		grid.setReferencePoint(gridReference);
+	public void setGridReference(Point.Double gridReference) {
+		this.gridReference = gridReference;
+		if (showGrid && tileSize != null && gridReference != null && gridSize != null && gridColor != null) {
+			gridLines.clear();
+			gridLines.addAll(buildGrid(tileSize, gridReference, gridSize, gridColor));
+			repaint();
+		}
 	}
+	
+	@Override
+	public void setGridSize(Point.Double gridSize) {
+		this.gridSize = gridSize;
+		if (showGrid && tileSize != null && gridReference != null && gridSize != null && gridColor != null) {
+			gridLines.clear();
+			gridLines.addAll(buildGrid(tileSize, gridReference, gridSize, gridColor));
+			repaint();
+		}
+	}
+	
+	private int tilesAcrossScreen(Point.Double gridSize) {
+		ICoordinate ul = getPosition(0,0);     	
+    	ICoordinate lr = getPosition(fsInsets.width, fsInsets.height);
+		double w = Math.abs(lr.getLat() - ul.getLat());
+		return (int) (w / (gridSize.x / 3600d));
+	}
+	
+	private List<? extends MapRectangleImpl> buildGrid(Point.Double tileSize, Point.Double gridReference, Point.Double gridSize, Color color) {
+		double width = Vincenty.milesToDegrees(gridSize.x, 90.0, getPosition().getLat());
+		double height = Vincenty.milesToDegrees(gridSize.y, 0, getPosition().getLat());
+		List<MapRectangleImpl> grid = Collections.synchronizedList(new LinkedList<MapRectangleImpl>());
+		Style style = new Style(new Color(color.getRed(), color.getGreen(), color.getBlue(), 192), 
+				new Color(color.getRed(), color.getGreen(), color.getBlue(), 192), new BasicStroke(), null);
+		for (double v = gridReference.x; v < gridReference.x + width; v = v + (tileSize.x / 3600.0)) {
+			MapRectangleImpl gridLine = new MapRectangleImpl(null, null, new Coordinate(gridReference.y, v), 
+					new Coordinate(gridReference.y - height, v), style);
+			grid.add(gridLine);
+		}
+		for (double h = gridReference.y; h > gridReference.y - height; h = h - (tileSize.y / 3600.0)) {
+			MapRectangleImpl gridLine = new MapRectangleImpl(null, null, new Coordinate(h, gridReference.x), 
+					new Coordinate(h, gridReference.x + width), style);
+			grid.add(gridLine);
+		}
+		return grid;
+	}
+	
+    /**
+     * Sets the displayed map pane and zoom level so that all chosen map elements are visible.
+     * @param markers whether to consider markers
+     * @param rectangles whether to consider rectangles
+     * @param testTiles whether to consider testTiles
+     */
+	@Override
+    public void setDisplayToFitMapElements(boolean gpsMarker, boolean signalMarkers, boolean testTiles, boolean rings) {
+        int nbElemToCheck = 0;
+        if (gpsMarker && gpsDot!= null) nbElemToCheck += 1;
+        if (signalMarkers && signalMarkerList != null) nbElemToCheck += signalMarkerList.size();
+        if (testTiles && testTileList != null) nbElemToCheck += testTileList.size();
+        if (rings && ringList != null) nbElemToCheck += ringList.size();
+        if (nbElemToCheck == 0) return;
+
+        int xMin = Integer.MAX_VALUE;
+        int yMin = Integer.MAX_VALUE;
+        int xMax = Integer.MIN_VALUE;
+        int yMax = Integer.MIN_VALUE;
+    //    int mapZoomMax = tileController.getTileSource().getMaxZoom();
+        int mapZoomMax = 15;
+
+        if (gpsMarker && gpsDot != null) {
+            synchronized (gpsDot) {
+                if (gpsDot.isVisible()) {
+                    Point p = tileSource.latLonToXY(gpsDot.getCoordinate(), mapZoomMax);
+                    xMax = Math.max(xMax, p.x);
+                    yMax = Math.max(yMax, p.y);
+                    xMin = Math.min(xMin, p.x);
+                    yMin = Math.min(yMin, p.y);
+                }
+            }
+        }
+
+        if (signalMarkers && signalMarkerList != null) {
+            synchronized (signalMarkerList) {
+                for (MapMarker signalMarker : signalMarkerList) {
+                    if (signalMarker.isVisible()) {
+                        Point p = tileSource.latLonToXY(signalMarker.getCoordinate(), mapZoomMax);
+                        xMax = Math.max(xMax, p.x);
+                        yMax = Math.max(yMax, p.y);
+                        xMin = Math.min(xMin, p.x);
+                        yMin = Math.min(yMin, p.y);
+                    }
+                }
+            }
+        }
+        
+        if (rings && ringList != null) {
+            synchronized (ringList) {
+                for (MapMarker ring : ringList) {
+                    if (ring.isVisible()) {
+                        Point p = tileSource.latLonToXY(ring.getCoordinate(), mapZoomMax);
+                        xMax = Math.max(xMax, p.x);
+                        yMax = Math.max(yMax, p.y);
+                        xMin = Math.min(xMin, p.x);
+                        yMin = Math.min(yMin, p.y);
+                    }
+                }
+            }
+        }
+
+        if (testTiles && testTileList != null) {
+            synchronized (testTileList) {
+                for (MapPolygon testTile : testTileList) {
+                    if (testTile.isVisible()) {
+                        for (ICoordinate c : testTile.getPoints()) {
+                            Point p = tileSource.latLonToXY(c, mapZoomMax);
+                            xMax = Math.max(xMax, p.x);
+                            yMax = Math.max(yMax, p.y);
+                            xMin = Math.min(xMin, p.x);
+                            yMin = Math.min(yMin, p.y);
+                        }
+                    }
+                }
+            }
+        }
+
+        int height = Math.max(0, getHeight());
+        int width = Math.max(0, getWidth());
+        int newZoom = mapZoomMax;
+        int x = xMax - xMin;
+        int y = yMax - yMin;
+        while (x > width || y > height) {
+            newZoom--;
+            x >>= 1;
+            y >>= 1;
+        }
+        x = xMin + (xMax - xMin) / 2;
+        y = yMin + (yMax - yMin) / 2;
+        int z = 1 << (mapZoomMax - newZoom);
+        x /= z;
+        y /= z;
+        setDisplayPosition(x, y, newZoom);
+    }
+    
+    public void setDisplayPosition(int x, int y, int zoom) {
+        setDisplayPosition(new Point(getWidth() / 2, getHeight() / 2), x, y, zoom);
+    }
+
+    @Override
+    public boolean isOptimizedDrawingEnabled() {
+    	return false;
+    }
+
 }
 
 		    	 

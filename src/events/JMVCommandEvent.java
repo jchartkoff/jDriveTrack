@@ -3,19 +3,18 @@ package events;
 import java.util.EventObject;
 
 public class JMVCommandEvent extends EventObject {
-    public enum COMMAND {
+    private static final long serialVersionUID = 8701544867914969620L;
+	private Command command;
+    private Object newValue;
+	
+	public enum Command {
         MOVE,
         ZOOM,
         ZOOM_IN_DISABLED,
         ZOOM_OUT_DISABLED
     }
 
-    private COMMAND command;
-    private Object newValue;
-
-    private static final long serialVersionUID = 8701544867914969620L;
-
-    public JMVCommandEvent(COMMAND cmd, Object source, Object newValue) {
+    public JMVCommandEvent(Command cmd, Object source, Object newValue) {
         super(source);
 
         setCommand(cmd);
@@ -26,11 +25,11 @@ public class JMVCommandEvent extends EventObject {
         super(source);
     }
 
-    public COMMAND getCommand() {
+    public Command getCommand() {
         return command;
     }
 
-    public void setCommand(COMMAND command) {
+    public void setCommand(Command command) {
         this.command = command;
     }
     

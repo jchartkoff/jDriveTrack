@@ -26,10 +26,10 @@ public class IntersectList extends SwingWorker<List<Point.Double>, Void> {
     	if (coneList == null || coneList.size() < 2) return intersectList;
     	if (coneList.size() > 1 && add > 0) {
 	    	for (int i = coneList.size() - 1; i >= coneList.size() - add; i--) {
-	    		List<Point.Double> sa1 = coneList.get(i).getHyperbolicPointArrayList();
+	    		List<Point.Double> sa1 = coneList.get(i).getHyperbolicPointList();
 	    		if (sa1 == null) return intersectList;
 				for (int n = i - 1; n >= 0; n--) {
-					List<Point.Double> sa2 = coneList.get(n).getHyperbolicPointArrayList();
+					List<Point.Double> sa2 = coneList.get(n).getHyperbolicPointList();
 					if (sa2 == null) return intersectList;
 					ArrayList<Point.Double> intersectPoints = new ArrayList<Point.Double>(3);
 					for (int q = 0; q < sa1.size(); q += 10) {
@@ -65,16 +65,16 @@ public class IntersectList extends SwingWorker<List<Point.Double>, Void> {
     
     
     private boolean isConvergent(ConicSection c1, ConicSection  c2) {
-    	double db = c1.getSMB().point.distance(c2.getSMB().point);
-    	double da = c1.getSMA().point.distance(c2.getSMA().point);
+    	double db = c1.getSMB().getPoint().distance(c2.getSMB().getPoint());
+    	double da = c1.getSMA().getPoint().distance(c2.getSMA().getPoint());
     	return da < db;
     }
 
     private Point.Double selectNearestPoint(ConicSection c1, ConicSection  c2, ArrayList<Point.Double> points) {
-    	double angleBetweenPoints = Vincenty.finalBearingTo(c1.getSMA().point, c2.getSMA().point);
-    	double distanceBetweenPoints = Vincenty.distanceToOnSurface(c1.getSMA().point, c2.getSMA().point);
+    	double angleBetweenPoints = Vincenty.finalBearingTo(c1.getSMA().getPoint(), c2.getSMA().getPoint());
+    	double distanceBetweenPoints = Vincenty.distanceToOnSurface(c1.getSMA().getPoint(), c2.getSMA().getPoint());
     	double distanceToNearestPoint = Double.MAX_VALUE;
-    	Point.Double centerPoint = Vincenty.getVincentyDirect(c1.getSMA().point, angleBetweenPoints, distanceBetweenPoints / 2d).point;
+    	Point.Double centerPoint = Vincenty.getVincentyDirect(c1.getSMA().getPoint(), angleBetweenPoints, distanceBetweenPoints / 2d).point;
     	Point.Double nearestPoint = null;
     	for (int i = 0; i < points.size(); i++) {
     		double distanceToThisPoint = centerPoint.distance(points.get(i));

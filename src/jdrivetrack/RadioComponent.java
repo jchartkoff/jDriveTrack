@@ -63,11 +63,14 @@ import radios.P7200;
 import radios.PCR1000;
 import radios.PCR2500;
 import radios.XG75;
+import types.EmissionDesignator;
+import types.SortedComboBoxModel;
 
 public class RadioComponent extends JDialog {
 	private static final long serialVersionUID = -7750081756785824878L;
 	
 	public static final String SERIAL_PORT_ERROR = "SERIAL_PORT_ERROR";
+	public static final String SCAN_MODE_CHANGE = "SCAN_MODE_CHANGE";
 	
 	public static final String DEFAULT_CAL_FILE_DIRECTORY = 
 			System.getProperty("user.home") + File.separator + "drivetrack" + File.separator + "cal";
@@ -138,7 +141,6 @@ public class RadioComponent extends JDialog {
 	private ButtonModel model;
 	private String calFileDir;
 	private String[] calFiles;
-	private int i;
 	private RadioButtonHandler rbh;
 	private RadioInterface radioInterface;
 	private SerialConfig serialConfig;
@@ -149,8 +151,9 @@ public class RadioComponent extends JDialog {
 	private NumberFormatter numberFormatter;
 	
 	private Preferences systemPrefs = Preferences.systemRoot().node("jdrivetrack/prefs/RadioComponent");
-
+	
 	public RadioComponent(int device, boolean clearAllPrefs) {
+
 		if (clearAllPrefs) {
 			try {
 				systemPrefs.clear();
@@ -217,6 +220,8 @@ public class RadioComponent extends JDialog {
 	}
 	
 	private void shutDown() {
+		radioInterface.stopScan();
+		radioInterface.initiateRadioStop();
 		saveGeneralPreferences();
 		saveRadioSpecificPreferences(getDeviceID());
 		serialConfig.saveSettings(getDeviceID());
@@ -239,11 +244,13 @@ public class RadioComponent extends JDialog {
     	frequencyTextField.addFocusListener(new FocusListener() {
     		@Override
     		public void focusGained(FocusEvent e) {
-    			frequencyTextField.setFont(new Font("Calabri", Font.BOLD, 11));
+    			frequencyTextField.setFont(new Font("Calabri", Font.BOLD, 12));
     		}
     		@Override
     		public void focusLost(FocusEvent e) {
-    			
+    			frequencyTextField.setFont(new Font("Calabri", Font.PLAIN, 11));
+		        frequency = Double.parseDouble(frequencyTextField.getText());
+		        radioInterface.setFrequency(frequency);
     		}	
     	});
 
@@ -254,7 +261,7 @@ public class RadioComponent extends JDialog {
     		}
     		@Override
     		public void keyPressed(KeyEvent event) {
-    			if (event.getKeyCode() == KeyEvent.VK_ENTER) {
+    			if (event.getKeyCode() == KeyEvent.VK_ENTER || event.getKeyCode() == KeyEvent.VK_TAB) {
     				frequencyTextField.setFont(new Font("Calabri", Font.PLAIN, 11));
     		        frequency = Double.parseDouble(frequencyTextField.getText());
     		        radioInterface.setFrequency(frequency);
@@ -392,28 +399,33 @@ public class RadioComponent extends JDialog {
 			}
 		});
 
-		for (i = 0; i < scan.length; i++) {
-			scanTextField[Integer.valueOf(i)].addFocusListener(new FocusListener() {
+		for (int ix = 0; ix < scanTextField.length; ix++) {
+			final int i = new Integer(ix);
+			scanTextField[i].addFocusListener(new FocusListener() {
 				@Override
 				public void focusGained(FocusEvent e) {
-					scanTextField[Integer.valueOf(i)].setFont(new Font("Calabri", Font.BOLD, 11));
+					scanTextField[i].setFont(new Font("Calabri", Font.BOLD, 12));
+					repaint();
 				}
 				@Override
 				public void focusLost(FocusEvent e) {
-					
+					scanTextField[i].setFont(new Font("Calabri", Font.PLAIN, 11));
+					scan[i] = Double.parseDouble(scanTextField[i].getText());
+			        scanTextField[i].transferFocus();
+			        repaint();
 				}	
 			});
-			scanTextField[Integer.valueOf(i)].addKeyListener(new KeyListener() {
+			scanTextField[i].addKeyListener(new KeyListener() {
 				@Override
 				public void keyTyped(KeyEvent event) {
 					
 				}
 				@Override
 				public void keyPressed(KeyEvent event) {
-					if (event.getKeyCode() == KeyEvent.VK_ENTER) {
-						scanTextField[Integer.valueOf(i)].setFont(new Font("Calabri", Font.PLAIN, 11));
-						scan[Integer.valueOf(i)] = Double.parseDouble(scanTextField[Integer.valueOf(i)].getText());
-				        scanTextField[Integer.valueOf(i)].transferFocus();
+					if (event.getKeyCode() == KeyEvent.VK_ENTER || event.getKeyCode() == KeyEvent.VK_TAB) {
+						scanTextField[i].setFont(new Font("Calabri", Font.PLAIN, 11));
+						scan[i] = Double.parseDouble(scanTextField[i].getText());
+				        scanTextField[i].transferFocus();
 					}
 				}
 				@Override
@@ -421,10 +433,10 @@ public class RadioComponent extends JDialog {
 
 				}
 			});
-			scanCheckBox[Integer.valueOf(i)].addActionListener(new ActionListener() {
+			scanCheckBox[i].addActionListener(new ActionListener() {
 				@Override
 				public void actionPerformed(ActionEvent event) {
-					scanCheckBoxActionPerformed(event, Integer.valueOf(i));
+					scanCheckBoxActionPerformed(event, i);
 				}
 			});
 		}
@@ -502,6 +514,7 @@ public class RadioComponent extends JDialog {
 			else if (ie.getSource() == scanListRadioButton)
 				vfoMode = false;
 			radioInterface.setVfoMode(vfoMode);
+			firePropertyChange(SCAN_MODE_CHANGE, null, vfoMode);
 		}
 	}
 
@@ -911,6 +924,7 @@ public class RadioComponent extends JDialog {
 	
 	private void applyButtonActionListenerEvent(ActionEvent event) {
 		saveGeneralPreferences();
+		sendParametersToRadio();
 		saveRadioSpecificPreferences(getDeviceID());
 		serialConfig.saveSettings(getDeviceID());
 		serialConfig.sendSerialPortSettingsFromMemoryToDevice();
@@ -997,8 +1011,8 @@ public class RadioComponent extends JDialog {
 		systemPrefs.put("calFileDir", calFileDir);
 		systemPrefs.putBoolean("startRadioWithSystem", startRadioWithSystem);
 		for (int i = 0; i < scan.length; i++) {
-			systemPrefs.putDouble("scanF" + i, scan[i]);
-			systemPrefs.putBoolean("scanSelectF" + i, scanSelect[i]);
+			systemPrefs.putDouble("scanF" + String.valueOf(i), scan[i]);
+			systemPrefs.putBoolean("scanSelectF" + String.valueOf(i), scanSelect[i]);
 		}
 	}
 	
@@ -1024,8 +1038,8 @@ public class RadioComponent extends JDialog {
 		calFileDir = systemPrefs.get("calFileDir", DEFAULT_CAL_FILE_DIRECTORY);
 		startRadioWithSystem = systemPrefs.getBoolean("startRadioWithSystem", false);
 		for (int i = 0; i < scan.length; i++) {
-			scan[i] = systemPrefs.getDouble("scanF" + i, 0.0);
-			scanSelect[i] = systemPrefs.getBoolean("scanSelectF" + i, false);
+			scan[i] = systemPrefs.getDouble("scanF" + String.valueOf(i), 0.0);
+			scanSelect[i] = systemPrefs.getBoolean("scanSelectF" + String.valueOf(i), false);
 		}
 	}
 
@@ -1149,8 +1163,8 @@ public class RadioComponent extends JDialog {
 		frequencyTextField = new JFormattedTextField(numberFormatter);
 		frequencyTextField.setHorizontalAlignment(SwingConstants.CENTER);
 		frequencyTextField.setFont(new Font("Calabri", Font.PLAIN, 11));
-		frequencyTextField.setBackground(Color.BLACK);
-		frequencyTextField.setForeground(Color.WHITE);
+		frequencyTextField.setBackground(Color.WHITE);
+		frequencyTextField.setForeground(Color.BLACK);
 		
 		memoryVfoPanel.setBorder(javax.swing.BorderFactory.createTitledBorder("Memory / VFO"));
 		frequencyTextFieldLabel.setHorizontalAlignment(SwingConstants.RIGHT);
@@ -1179,13 +1193,13 @@ public class RadioComponent extends JDialog {
 		scanListRadioButton.addItemListener(rbh);
 		
         for (int i = 0; i < scan.length; i++) {
-			scanLabel[i] = new JLabel("F" + i);
+			scanLabel[i] = new JLabel("F" + String.valueOf(i));
 			scanTextField[i] = new JFormattedTextField(decimalFormat.format(scan[i]));
 			scanCheckBox[i] = new JCheckBox("", scanSelect[i]);
 			scanTextField[i].setHorizontalAlignment(SwingConstants.RIGHT);
 			scanTextField[i].setFont(new Font("Calabri", Font.PLAIN, 11));
-			scanTextField[i].setBackground(Color.BLACK);
-			scanTextField[i].setForeground(Color.WHITE);
+			scanTextField[i].setBackground(Color.WHITE);
+			scanTextField[i].setForeground(Color.BLACK);
 		}
         
         calFileComboBoxModel = new SortedComboBoxModel();
@@ -1312,4 +1326,5 @@ public class RadioComponent extends JDialog {
 		}
 		return dev;
 	}
+
 }

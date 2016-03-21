@@ -230,7 +230,7 @@ public class Utility {
     public static BufferedImage getDefaultIcon(Dimension size) {
 		Graphics2D g = null;
 		try {
-			BufferedImage bi = new BufferedImage(size.width, size.height, BufferedImage.TYPE_INT_RGB);
+			final BufferedImage bi = new BufferedImage(size.width, size.height, BufferedImage.TYPE_INT_RGB);
 			g = bi.createGraphics();
 			g.setColor(Color.GRAY);
 			g.setStroke(new BasicStroke(2.0f));

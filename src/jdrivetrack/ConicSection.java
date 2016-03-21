@@ -2,9 +2,13 @@ package jdrivetrack;
 
 import gov.nasa.worldwind.geom.Angle;
 import gov.nasa.worldwind.geom.LatLon;
+import interfaces.ICoordinate;
+import types.Coordinate;
+import types.StaticMeasurement;
 
 import java.awt.Point;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class ConicSection {
@@ -23,21 +27,17 @@ public class ConicSection {
 	private StaticMeasurement sma;
 	private StaticMeasurement smb;
 	private List<Point.Double> arcPointList;
-	private List<Point.Double> hyperbolicPointArrayList;
+	private List<Point.Double> hyperbolicPointList;
 	private Point.Double[] hyperbolicArc;
 	private Point.Double[] hyperbolicPointArray;
 	private List<LatLon> hyperbolicLatLonList;
 	
 	private static final int ARRAY_SIZE = 512;
-
-	public ConicSection(StaticMeasurement sma, StaticMeasurement smb) {
-		this(sma, smb, 1);
-	}
 	
 	public ConicSection(StaticMeasurement sma, StaticMeasurement smb, int unit) {
 		this.sma = sma;
 		this.smb = smb;
-		this.unit = unit;
+		this.setUnit(unit);
 		setUnit(unit);
 		calculateHyperbolicArc(sma, smb);
 		createPoints();
@@ -45,24 +45,24 @@ public class ConicSection {
 	
 	private void calculateHyperbolicArc(StaticMeasurement sma, StaticMeasurement smb) {
 		courseMadeGood = courseMadeGood(sma, smb);
-		approachAngle = approachAngle(sma, smb);
-		center = center(sma.point);
+		approachAngle = getApproachAngle(sma, smb);
+		center = center(sma.getPoint());
 		dbm = distanceBetweenMeasurements(sma, smb);
         catt = RFPath.conicAngleToTarget(sma, smb);
-        a = a(center, catt, sma.altitude);
+        a = a(center, catt, sma.getAltitude());
     	b = b(a, catt);
         vertex = vertex(center, a, courseMadeGood);
         focus = focus(center, courseMadeGood, a, b);
-		eccentricity = eccentricity(a, b);
+		eccentricity = getEccentricity(a, b);
 		directrix = a / eccentricity;
 	}
 	
 	private void createPoints() {
 		hyperbolicArc = createHyperbolicArc(b, a);
 		hyperbolicPointArray = createSymmetricArcPointArray(hyperbolicArc, center, courseMadeGood);
-		arcPointList = convertArrayToList(hyperbolicArc);
-		hyperbolicPointArrayList = convertArrayToList(hyperbolicPointArray);
-		hyperbolicLatLonList = convertArrayToLatLonList(hyperbolicPointArray);
+		arcPointList = arrayToList(hyperbolicArc);
+		hyperbolicPointList = arrayToList(hyperbolicPointArray);
+		hyperbolicLatLonList = arrayToLatLonList(hyperbolicPointArray);
 	}
 	
 	private Point.Double center(Point.Double pa) {
@@ -70,21 +70,21 @@ public class ConicSection {
 	}
 	
 	private double distanceBetweenMeasurements(StaticMeasurement sma, StaticMeasurement smb) {
-		return Vincenty.distanceToDirect(sma.point, sma.altitude, smb.point, smb.altitude);
+		return Vincenty.distanceToDirect(sma.getPoint(), sma.getAltitude(), smb.getPoint(), smb.getAltitude());
 	}
 
-	private double approachAngle(StaticMeasurement sma, StaticMeasurement smb) {
-		double altitudeDelta = sma.altitude - smb.altitude;
-		double horizontalRange = Vincenty.distanceToDirect(smb.point, 0, sma.point, 0);
+	private double getApproachAngle(StaticMeasurement sma, StaticMeasurement smb) {
+		double altitudeDelta = sma.getAltitude() - smb.getAltitude();
+		double horizontalRange = Vincenty.distanceToDirect(smb.getPoint(), 0, sma.getPoint(), 0);
 		return Math.toDegrees(Math.atan(altitudeDelta / horizontalRange));
 	}
 
-	private double eccentricity(double a, double b) {
+	private double getEccentricity(double a, double b) {
 		return Math.sqrt((a*a) + (b*b)) / a;
 	}
 	
     private double courseMadeGood(StaticMeasurement sma, StaticMeasurement smb) {
-    	return Vincenty.finalBearingTo(smb.point, sma.point);
+    	return Vincenty.finalBearingTo(smb.getPoint(), sma.getPoint());
     }
     
     private Point.Double focus(Point.Double center, double cmg, double a, double b) {
@@ -97,7 +97,7 @@ public class ConicSection {
     	double dm = Vincenty.degreesToMeters(a, cmg, center.y);
     	return Vincenty.getVincentyDirect(center, cmg, dm).point;
     }
-
+    
     private double a(Point.Double center, double catt, double altitude) {
     	double da = altitude / Math.tan(Math.toRadians(catt));
     	return Vincenty.metersToDegrees(da, 90, center.y);
@@ -107,23 +107,29 @@ public class ConicSection {
     	return a * Math.tan(Math.toRadians(catt));
     }
     
-    private List<Point.Double> convertArrayToList(Point.Double[] array) {
-    	List<Point.Double> list = new ArrayList<Point.Double>(array.length);
-    	for (Point.Double point : array) {
-    		list.add(point);
-    	}
+    private List<Point.Double> arrayToList(Point.Double[] array) {    	
+    	List<Point.Double> list = Arrays.asList(array);
     	return list;
     }
 
-    private List<LatLon> convertArrayToLatLonList(Point.Double[] array) {
+    private List<LatLon> arrayToLatLonList(Point.Double[] array) {
     	List<LatLon> list = new ArrayList<LatLon>(array.length);
     	for (Point.Double point : array) {
     		list.add(LatLon.fromDegrees(point.y, point.x));
+    		
     	}
     	return list;
     }
     
-    public static Point.Double[] createHyperbolicArc(final double b, final double a) {
+    public List<ICoordinate> getCoordinateList() {
+    	List<ICoordinate> coords = new ArrayList<ICoordinate>();
+    	for (Point.Double point : hyperbolicPointList) {
+    		coords.add(new Coordinate(point.x, point.y));
+    	}
+    	return coords;
+    }
+    
+    private Point.Double[] createHyperbolicArc(final double b, final double a) {
     	Point.Double[] arc = new Point.Double[ARRAY_SIZE];
     	double incr = 1.0 / arc.length;
     	double x = a;
@@ -135,7 +141,7 @@ public class ConicSection {
     	return arc;
     }
 
-    public Point.Double[] createSymmetricArcPointArray(Point.Double[] arcArray, Point.Double c, double cmg) {
+    private Point.Double[] createSymmetricArcPointArray(Point.Double[] arcArray, Point.Double c, double cmg) {
     	Point.Double[] pa = new Point.Double[arcArray.length * 2];
     	for (int i = arcArray.length - 1; i >= 0; i--) {
     		Point.Double n = arcArray[i];
@@ -150,15 +156,15 @@ public class ConicSection {
     	return pa;
     }
     
-    public Point.Double translate(final Point.Double c, final Point.Double pt, final double rotate) {
+    private Point.Double translate(final Point.Double c, final Point.Double pt, final double rotate) {
     	double t = LatLon.rhumbAzimuth(LatLon.fromDegrees(c.y, c.x), LatLon.fromDegrees(pt.y, pt.x)).getDegrees();
     	Angle h = Angle.fromDegrees(c.distance(pt));
         LatLon d = LatLon.rhumbEndPosition(LatLon.fromDegrees(c.y, c.x), Angle.fromDegrees(rotate + t), h);
     	return new Point.Double(d.getLongitude().getDegrees(), d.getLatitude().getDegrees());
     }
     
-    public List<LatLon> getAsymptotes() {
-    	double h = center.distance(hyperbolicPointArrayList.get(0));
+    public List<LatLon> getAsymptoteLatLonList() {
+    	double h = center.distance(hyperbolicPointList.get(0));
     	List<LatLon> list = new ArrayList<LatLon>(3);
     	double y1 = ((b/a) * h) + center.y;
     	double x = center.x + h;
@@ -171,28 +177,37 @@ public class ConicSection {
     	return list;
     }
     
-    public List<Point.Double> getAsymptoteCoords() {
-    	List<Point.Double> coords = new ArrayList<Point.Double>(3);
-    	List<LatLon> latLon = getAsymptotes();
+    public List<ICoordinate> getAsymptoteCoordinateList() {
+    	List<ICoordinate> coords = new ArrayList<ICoordinate>(3);
+    	List<LatLon> latLon = getAsymptoteLatLonList();
     	for (int i = 0; i < latLon.size(); i++) {
-    		coords.add(new Point.Double(latLon.get(i).longitude.degrees, latLon.get(i).latitude.degrees));
+    		coords.add(new Coordinate(latLon.get(i).longitude.degrees, latLon.get(i).latitude.degrees));
     	}
     	return coords;
     }
     
-    public Point.Double[] getAsymptoteCoordArray() {
-    	Point.Double[] coords = new Point.Double[3];
-    	List<LatLon> latLon = getAsymptotes();
+    public List<Point.Double> getAsymptotePointList() {
+    	List<Point.Double> points = new ArrayList<Point.Double>(3);
+    	List<LatLon> latLon = getAsymptoteLatLonList();
     	for (int i = 0; i < latLon.size(); i++) {
-    		coords[i] = new Point.Double(latLon.get(i).longitude.degrees, latLon.get(i).latitude.degrees);
+    		points.add(new Point.Double(latLon.get(i).longitude.degrees, latLon.get(i).latitude.degrees));
     	}
-    	return coords;
+    	return points;
+    }
+    
+    public Point.Double[] getAsymptotePointArray() {
+    	Point.Double[] point = new Point.Double[3];
+    	List<LatLon> latLon = getAsymptoteLatLonList();
+    	for (int i = 0; i < latLon.size(); i++) {
+    		point[i] = new Point.Double(latLon.get(i).longitude.degrees, latLon.get(i).latitude.degrees);
+    	}
+    	return point;
     }
     
     public void setUnit(int unit) {
     	this.unit = unit;
-    	sma.unit = unit;
-    	smb.unit = unit;
+    	sma.setUnit(unit);
+    	smb.setUnit(unit);
     }
     
     public int getUnit() {
@@ -207,8 +222,8 @@ public class ConicSection {
     	return hyperbolicLatLonList;
     }
     
-    public List<Point.Double> getHyperbolicPointArrayList() {
-    	return hyperbolicPointArrayList;
+    public List<Point.Double> getHyperbolicPointList() {
+    	return hyperbolicPointList;
     }
 
     public StaticMeasurement getSMA() {
@@ -276,7 +291,7 @@ public class ConicSection {
 		vertex = vertex(center, a, courseMadeGood);
 		b = Math.tan(Math.toRadians(catt)) * a;
 		focus = focus(center, courseMadeGood, a, b);
-		eccentricity = eccentricity(a, b);
+		eccentricity = getEccentricity(a, b);
 		directrix = a / eccentricity;
     	createPoints();
     }
@@ -284,7 +299,7 @@ public class ConicSection {
     public void setB(double b) {
     	this.b = b;
     	focus = focus(center, courseMadeGood, a, b);
-		eccentricity = eccentricity(a, b);
+		eccentricity = getEccentricity(a, b);
 		directrix = a / eccentricity;
     	createPoints();
     }
@@ -300,7 +315,7 @@ public class ConicSection {
     	this.catt = catt;
 		b = Math.tan(Math.toRadians(catt)) * a;
 		focus = focus(center, courseMadeGood, a, b);
-		eccentricity = eccentricity(a, b);
+		eccentricity = getEccentricity(a, b);
 		directrix = a / eccentricity;
 		createPoints();
     }
@@ -321,7 +336,7 @@ public class ConicSection {
     	a = Math.sqrt((c*c) - (b*b));
     	b = Math.tan(Math.toRadians(catt)) * a;
     	vertex = vertex(center, a, courseMadeGood);
-    	eccentricity = eccentricity(a, b);
+    	eccentricity = getEccentricity(a, b);
 		directrix = a / eccentricity;
 		createPoints();
     }
@@ -339,7 +354,7 @@ public class ConicSection {
     	a = Math.sqrt((c*c) - (b*b));
 		b = Math.tan(Math.toRadians(catt)) * a;
 		focus = focus(center, courseMadeGood, a, b);
-		eccentricity = eccentricity(a, b);
+		eccentricity = getEccentricity(a, b);
 		directrix = a / eccentricity;
 		createPoints();
     }
@@ -363,5 +378,4 @@ public class ConicSection {
 	public StaticMeasurement getTrailingStaticMeasurement() {
 		return smb;
 	}
-
 }

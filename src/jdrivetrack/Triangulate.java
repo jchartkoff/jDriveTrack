@@ -7,6 +7,8 @@ import java.util.concurrent.ExecutionException;
 
 import javax.swing.SwingWorker;
 
+import types.Bearing;
+
 public class Triangulate extends SwingWorker<Point.Double, Void> {
 	private static final double RDF_BEARING_LENGTH_IN_DEGREES = 0.500;
 	

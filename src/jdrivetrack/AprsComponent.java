@@ -64,7 +64,7 @@ public class AprsComponent extends JDialog {
 	private APRSInterface aprsInterface;
 	private SerialConfig serialConfig;
 	
-	private Preferences systemPrefs = Preferences.systemRoot().node("jdrivetrack/prefs/AprsComponent");
+	private Preferences systemPrefs = Preferences.userRoot().node("jdrivetrack/prefs/AprsComponent");
 	
 	public AprsComponent() {
 		getGeneralPreferences();

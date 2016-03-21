@@ -7,12 +7,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import jdrivetrack.Coordinate;
 import jdrivetrack.OsmMercator;
-import jdrivetrack.Tile;
-import jdrivetrack.TileXY;
 import interfaces.ICoordinate;
 import tilesources.TileSourceInfo;
+import types.Coordinate;
+import types.Tile;
+import types.TileXY;
 
 
 /**

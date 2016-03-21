@@ -1,4 +1,3 @@
-// License: GPL. For details, see Readme.txt file.
 package jdrivetrack;
 
 import java.awt.Point;

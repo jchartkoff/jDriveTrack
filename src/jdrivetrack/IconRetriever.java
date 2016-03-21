@@ -3,6 +3,8 @@ package jdrivetrack;
 import java.awt.Dimension;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.net.URISyntaxException;
+import java.net.URL;
 
 import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
@@ -13,23 +15,28 @@ import javax.swing.JToggleButton;
 import javax.swing.SwingWorker;
 
 public class IconRetriever extends SwingWorker<BufferedImage, Void> {
-	private String strImageFile;
 	private Object object;
+	private File file;
     
-    public IconRetriever(Object object, String strImageFile) {
-        this.strImageFile = strImageFile;
+    public IconRetriever(Object object, URL url) throws URISyntaxException {
+        this.file = new File(url.toURI());
         this.object = object;
         execute();
     }
-
+    
+    public IconRetriever(Object object, String str) {
+    	this.file = new File(str);
+        this.object = object;
+        execute();
+    }
+    
     @Override
     protected BufferedImage doInBackground() throws Exception {
     	try {
-    		File imageFile = new File(strImageFile);
-    		return ImageIO.read(imageFile);
+    		return ImageIO.read(file);
     	}
     	catch (Exception ex) {
-    		System.err.println(strImageFile);
+    		System.err.println(file.getPath() + " not found");
     		return Utility.getDefaultIcon(new Dimension(16,16));
     	}
     }

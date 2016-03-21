@@ -1,7 +1,7 @@
 // License: GPL. For details, see Readme.txt file.
 package interfaces;
 
-import jdrivetrack.Tile;
+import types.Tile;
 
 public interface TileLoaderListener {
 

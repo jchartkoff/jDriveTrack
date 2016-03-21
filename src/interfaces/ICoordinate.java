@@ -1,5 +1,6 @@
-// License: GPL. For details, see Readme.txt file.
 package interfaces;
+
+import java.awt.geom.Point2D;
 
 public interface ICoordinate {
 
@@ -10,4 +11,6 @@ public interface ICoordinate {
     double getLon();
 
     void setLon(double lon);
+    
+    Point2D.Double getLonLat();
 }

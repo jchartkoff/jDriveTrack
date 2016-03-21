@@ -3,6 +3,8 @@ package jdrivetrack;
 import java.util.ArrayList;
 import java.util.List;
 
+import types.Style;
+
 public class AbstractLayer {
     private LayerGroup parent;
     private String name;

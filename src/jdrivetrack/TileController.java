@@ -3,6 +3,7 @@ package jdrivetrack;
 import interfaces.TileLoader;
 import interfaces.TileLoaderListener;
 import interfaces.TileSource;
+import types.Tile;
 
 public class TileController {
     private TileLoader tileLoader;
@@ -22,10 +23,10 @@ public class TileController {
         Tile tile = tileCache.getTile(tileSource, tilex, tiley, zoom);
         if (tile == null) {
             tile = new Tile(tileSource, tilex, tiley, zoom);
-            tileCache.addTile(tile);
+        //    tileCache.addTile(tile);
             tile.loadPlaceholderFromCache(tileCache);
         }
-        if (tile.error) {
+        if (tile.hasError()) {
             tile.loadPlaceholderFromCache(tileCache);
         }
         if (!tile.isLoaded()) {

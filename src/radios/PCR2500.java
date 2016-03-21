@@ -18,10 +18,10 @@ import javax.swing.SwingWorker;
 import javax.swing.Timer;
 
 import jdrivetrack.CalibrationDataObject;
-import jdrivetrack.EmissionDesignator;
 import jdrivetrack.Utility;
 import interfaces.RadioInterface;
 import jssc.SerialPort;
+import types.EmissionDesignator;
 
 public class PCR2500 implements RadioInterface {
 	private static final String versionUID = "3045264089232056863";

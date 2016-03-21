@@ -6,8 +6,8 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
-import jdrivetrack.Tile;
-import jdrivetrack.TileXY;
+import types.Tile;
+import types.TileXY;
 
 
 /**

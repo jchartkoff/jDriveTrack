@@ -74,16 +74,16 @@ public class Asymptote2D implements Shape {
 		return path;
 	}
 	
-	private GeneralPath path(Point2D.Double center, double dirction, double catt, double length) {
+	private GeneralPath path(Point2D.Double center, double direction, double catt, double length) {
 		GeneralPath path = new GeneralPath();
 		Point2D.Double n = new Point2D.Double(length, Math.tan(Math.toRadians(catt)) * length);
-        double tp = dirction + catt;
+        double tp = direction + catt;
         double hp = Math.sqrt((n.x*n.x)+(n.y*n.y));       
         double x = Math.sin(Math.toRadians(tp)) * hp;
     	double y = Math.cos(Math.toRadians(tp)) * hp; 
     	path.moveTo(center.x + x, center.y - y);
     	path.lineTo(center.x, center.y);
-    	tp = dirction - catt;       
+    	tp = direction - catt;       
         x = Math.sin(Math.toRadians(tp)) * hp;
      	y = Math.cos(Math.toRadians(tp)) * hp; 
      	path.lineTo(center.x + x, center.y - y);

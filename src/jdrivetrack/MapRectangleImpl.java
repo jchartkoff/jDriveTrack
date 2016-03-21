@@ -9,6 +9,9 @@ import java.awt.Point;
 import java.awt.Stroke;
 
 import interfaces.MapRectangle;
+import types.Coordinate;
+import types.Layer;
+import types.Style;
 
 public class MapRectangleImpl extends MapObjectImpl implements MapRectangle {
 

@@ -15,7 +15,9 @@ public class Hyperbola2D implements Shape {
 	private double d;
 	private Point2D.Double center;
 	private double length;
-
+	
+	public Hyperbola2D() {};
+	
 	public Hyperbola2D(double a, double b, double d, Point2D.Double center, double length) {
 		this.a = a;
 		this.b = b;
@@ -25,7 +27,7 @@ public class Hyperbola2D implements Shape {
 		createHyperbola(a, b, d, center, length);
 	}
 
-    private GeneralPath arcPath(Point2D.Double[] pointArray) {
+	private GeneralPath arcPath(Point2D.Double[] pointArray) {
     	GeneralPath arcPath = new GeneralPath();
     	arcPath.moveTo(pointArray[0].x, pointArray[0].y);
     	for (int i = 1; i < pointArray.length; i++) {
@@ -34,7 +36,7 @@ public class Hyperbola2D implements Shape {
 	    }
 		return arcPath;
     }
-    
+
     private void createHyperbola(double a, double b, double d, Point2D.Double center, double length) {
 		Point2D.Double[] arcArray = createHyperbolicArc(b, a, length);
 		Point2D.Double[] pointArray =  createHyperbolicPointArray(arcArray, center, d);
@@ -75,7 +77,7 @@ public class Hyperbola2D implements Shape {
     	}
     	return pa;
     }
-    
+
     public double getDistanceX(Point2D.Double a, Point2D.Double b) {
     	return Math.abs(b.x - a.x);
     }
@@ -103,6 +105,15 @@ public class Hyperbola2D implements Shape {
     public void setLength(double length) {
     	this.length = length;
     	createHyperbola(a, b, d, center, length);
+    }
+    
+    public void setHyperbola(double a, double b, double d, Point2D.Double center, double length) {
+    	this.length = length;
+    	this.a = a;
+    	this.b = b;
+    	this.d = d;
+    	this.center = center;
+    	this.length = length;
     }
     
     public double getA() {

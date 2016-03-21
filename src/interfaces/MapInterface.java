@@ -16,8 +16,10 @@ import java.util.List;
 
 import jdrivetrack.AttributionSupport;
 import jdrivetrack.ConicSection;
-import jdrivetrack.GeoTile;
-import jdrivetrack.MapDimension;
+import types.GeoTile;
+import types.MapDimension;
+import types.StaticMeasurement;
+import types.TestTile;
 
 public interface MapInterface {
 	
@@ -28,13 +30,13 @@ public interface MapInterface {
 	
 	void addIcon(Point.Double point, String iconPath, String identifier);
 
-	void addLine(Point.Double point, double angle, Color color);
+	void addLine(Point.Double point, double angle, double distance, Color color);
 
 	void addLine(Point.Double pointA, Point.Double pointB, Color color);
 
 	void addQuad(Point.Double point, Point.Double size, Color color);
 
-	void changeQuadColor(int index, Color color) throws IndexOutOfBoundsException;
+	void changeQuadColor(int index, Color color);
 
 	Object clone() throws CloneNotSupportedException;
 
@@ -70,17 +72,13 @@ public interface MapInterface {
 
 	boolean isVisible();
 
-	void moveIcon(int index, Point.Double point) throws IndexOutOfBoundsException;
+	void moveIcon(int index, Point.Double point);
 
 	int numberOfIcons();
 
-	void deleteSignalMarker(int index) throws IndexOutOfBoundsException;
+	void deleteSignalMarker(int index);
 	
-	void hideIcon(int index) throws IndexOutOfBoundsException;
-
-	void hideLine(int index) throws IndexOutOfBoundsException;
-	
-	void deleteQuad(int index) throws IndexOutOfBoundsException;
+	void deleteQuad(int index);
 	
 	void repaint();
 
@@ -90,7 +88,7 @@ public interface MapInterface {
 	
 	void setGridColor(Color gridColor);
 
-	void setGridSize(Point.Double gridSize);
+	void setTileSize(Point.Double gridSize);
 
 	void setScale(double scale);
 
@@ -133,8 +131,6 @@ public interface MapInterface {
 	void deleteAllArcs();
 
 	void removeArc(int index);
-
-	void addArc(ConicSection cone);
 
 	void showArcs(boolean show);
 
@@ -244,18 +240,9 @@ public interface MapInterface {
 
 	void setQuadVisible(int index, boolean isVisible);
 
-	void addPolygon(GeoTile geotile);
+	void deleteAllTestTiles();
 
-	void deletePolygon(int index) throws IndexOutOfBoundsException;
-
-	void setPolygonVisible(int index, boolean isVisible);
-
-	void changePolygonColor(int index, Color color)
-			throws IndexOutOfBoundsException;
-
-	void deleteAllPolygons();
-
-	void showPolygons(boolean showPolygons);
+	void showTestTiles(boolean showTestTiles);
 
 	boolean isShowSignalMarkers();
 
@@ -265,7 +252,7 @@ public interface MapInterface {
 	
 	void setArcIntersectPointRadius(double radius);
 
-	boolean isShowPolygons();
+	boolean isShowTestTiles();
 
 	boolean isShowLines();
 
@@ -273,7 +260,7 @@ public interface MapInterface {
 
 	boolean isShowArcIntersectPoints();
 
-	void addSignalMarker(Double pt, Color color);
+	void addSignalMarker(Point.Double point, Color color);
 
 	void shutDown();
 
@@ -314,5 +301,49 @@ public interface MapInterface {
 	void handlePosition(MouseEvent e);
 
 	void setGridReference(Double gridReference);
+
+	void setGridSize(Double gridFieldDimension);
+	
+	void clearCache();
+
+	void setDisplayToFitMapElements(boolean gpsMarker, boolean signalMarkers, boolean testTiles, boolean rings);
+
+	void addArc(StaticMeasurement sma, StaticMeasurement smb, int unit);
+
+	void addArc(ConicSection cone);
+
+	int getCurrentSignalMarkerIndex();
+
+	int getCurrentIconIndex();
+
+	int getCurrentQuadIndex();
+
+	int getCurrentRingIndex();
+
+	int getCurrentLineIndex();
+
+	void deleteLine(int index);
+
+	void deleteCurrentLine();
+
+	void deleteCurrentQuad();
+
+	void deleteRing(int index);
+
+	void deleteCurrentRing();
+
+	void deleteIcon(int index);
+
+	void deleteCurrentIcon();
+
+	void deleteArc(int index);
+
+	void deleteCurrentArc();
+
+	void deleteTestTile(TestTile testTile);
+
+	void addTestTile(GeoTile geoTile, Color color, int id);
+
+	void changeTestTileColor(TestTile testTile, Color color) throws IndexOutOfBoundsException;
 
 }

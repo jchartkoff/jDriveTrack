@@ -8,11 +8,15 @@ import java.awt.Stroke;
 
 import javax.swing.UIManager;
 
+import types.Layer;
+import types.Style;
+
 public abstract class MapObjectImpl {
     private Layer layer;
     private String name;
     private Style style;
     private Boolean visible;
+    private int id;
 
     public MapObjectImpl(String name) {
         this(null, name, null);
@@ -29,6 +33,14 @@ public abstract class MapObjectImpl {
         this.style = style;
     }
 
+    public MapObjectImpl(Layer layer, String name, Style style, int id) {
+    	super();
+        this.layer = layer;
+        this.name = name;
+        this.style = style;
+        this.id = id;
+    }
+    
     public Layer getLayer() {
         return layer;
     }
@@ -104,11 +116,19 @@ public abstract class MapObjectImpl {
     public String getName() {
         return name;
     }
-
+    
+    public int getID() {
+    	return id;
+    }
+    
     public void setName(String txt) {
         this.name = txt;
     }
-
+    
+    public void setID(int id) {
+    	this.id = id;
+    }
+    
     public static Font getDefaultFont() {
         Font f = UIManager.getDefaults().getFont("TextField.font");
         if (f == null) {

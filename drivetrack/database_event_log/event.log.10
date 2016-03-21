@@ -1,0 +1,75 @@
+Feb 03, 2016 12:19:14 AM jdrivetrack.DerbyDatabase reportException
+WARNING: Exception
+java.sql.SQLDataException: The resulting value is outside the range for the data type DOUBLE.
+	at org.apache.derby.impl.jdbc.SQLExceptionFactory.getSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.Util.generateCsSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.TransactionResourceImpl.wrapInSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedResultSet.noStateChangeException(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedPreparedStatement.setDouble(Unknown Source)
+	at jdrivetrack.UTMTestTile.getAppendPreparedSatatement(UTMTestTile.java:355)
+	at jdrivetrack.DerbyDatabase$AppendTileDataRecord.run(DerbyDatabase.java:274)
+	at java.lang.Thread.run(Unknown Source)
+Caused by: ERROR 22003: The resulting value is outside the range for the data type DOUBLE.
+	at org.apache.derby.iapi.error.StandardException.newException(Unknown Source)
+	at org.apache.derby.iapi.error.StandardException.newException(Unknown Source)
+	at org.apache.derby.iapi.types.NumberDataType.normalizeDOUBLE(Unknown Source)
+	at org.apache.derby.iapi.types.SQLDouble.setValue(Unknown Source)
+	... 4 more
+
+Feb 03, 2016 12:19:24 AM jdrivetrack.DerbyDatabase reportException
+WARNING: Exception
+java.sql.SQLDataException: The resulting value is outside the range for the data type DOUBLE.
+	at org.apache.derby.impl.jdbc.SQLExceptionFactory.getSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.Util.generateCsSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.TransactionResourceImpl.wrapInSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedResultSet.noStateChangeException(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedPreparedStatement.setDouble(Unknown Source)
+	at jdrivetrack.UTMTestTile.getAppendPreparedSatatement(UTMTestTile.java:355)
+	at jdrivetrack.DerbyDatabase$AppendTileDataRecord.run(DerbyDatabase.java:274)
+	at java.lang.Thread.run(Unknown Source)
+Caused by: ERROR 22003: The resulting value is outside the range for the data type DOUBLE.
+	at org.apache.derby.iapi.error.StandardException.newException(Unknown Source)
+	at org.apache.derby.iapi.error.StandardException.newException(Unknown Source)
+	at org.apache.derby.iapi.types.NumberDataType.normalizeDOUBLE(Unknown Source)
+	at org.apache.derby.iapi.types.SQLDouble.setValue(Unknown Source)
+	... 4 more
+
+Feb 03, 2016 12:19:27 AM jdrivetrack.DerbyDatabase reportException
+WARNING: Exception
+java.sql.SQLDataException: The resulting value is outside the range for the data type DOUBLE.
+	at org.apache.derby.impl.jdbc.SQLExceptionFactory.getSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.Util.generateCsSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.TransactionResourceImpl.wrapInSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedResultSet.noStateChangeException(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedPreparedStatement.setDouble(Unknown Source)
+	at jdrivetrack.UTMTestTile.getAppendPreparedSatatement(UTMTestTile.java:355)
+	at jdrivetrack.DerbyDatabase$AppendTileDataRecord.run(DerbyDatabase.java:274)
+	at java.lang.Thread.run(Unknown Source)
+Caused by: ERROR 22003: The resulting value is outside the range for the data type DOUBLE.
+	at org.apache.derby.iapi.error.StandardException.newException(Unknown Source)
+	at org.apache.derby.iapi.error.StandardException.newException(Unknown Source)
+	at org.apache.derby.iapi.types.NumberDataType.normalizeDOUBLE(Unknown Source)
+	at org.apache.derby.iapi.types.SQLDouble.setValue(Unknown Source)
+	... 4 more
+
+Feb 03, 2016 7:14:53 PM jdrivetrack.DerbyDatabase reportException
+WARNING: Exception
+java.sql.SQLException: SQL text pointer is null.
+	at org.apache.derby.impl.jdbc.SQLExceptionFactory.getSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.SQLExceptionFactory.getSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.Util.generateCsSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.Util.generateCsSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedConnection.newSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.ConnectionChild.newSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedPreparedStatement.<init>(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedPreparedStatement42.<init>(Unknown Source)
+	at org.apache.derby.jdbc.Driver42.newEmbedPreparedStatement(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedConnection.prepareStatement(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedConnection.prepareStatement(Unknown Source)
+	at jdrivetrack.DerbyDatabase$RetrieveRecord.run(DerbyDatabase.java:539)
+	at java.lang.Thread.run(Unknown Source)
+Caused by: ERROR XJ067: SQL text pointer is null.
+	at org.apache.derby.iapi.error.StandardException.newException(Unknown Source)
+	at org.apache.derby.impl.jdbc.SQLExceptionFactory.wrapArgsForTransportAcrossDRDA(Unknown Source)
+	... 13 more
+

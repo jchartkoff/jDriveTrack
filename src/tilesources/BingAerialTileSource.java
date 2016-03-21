@@ -33,9 +33,9 @@ import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
 import interfaces.ICoordinate;
-import jdrivetrack.Coordinate;
 import jdrivetrack.OpenStreetMapPanel;
 import tilesources.TileSourceInfo;
+import types.Coordinate;
 
 public class BingAerialTileSource extends AbstractTMSTileSource {
 

@@ -1,10 +1,11 @@
-package jdrivetrack;
+package main.java;
 
 import gov.nasa.worldwind.geom.LatLon;
 import gov.nasa.worldwind.layers.RenderableLayer;
 import gov.nasa.worldwind.render.BasicShapeAttributes;
 import gov.nasa.worldwind.render.Material;
 import gov.nasa.worldwind.render.SurfacePolyline;
+import types.MapDimension;
 
 import java.awt.Color;
 import java.awt.Point;

@@ -18,6 +18,7 @@ import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.geom.Point2D;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.text.DecimalFormat;
@@ -77,6 +78,7 @@ public class SerialGPSComponent extends JDialog {
 	private JLabel gpsSymbolRadiusLabel;
 	private double gpsSymbolRadius;
 	private boolean isOnLine = false;
+	private Point2D.Double defaultPosition = new Point2D.Double();
 	
 	private Preferences userPref = Preferences.userRoot().node(this.getClass().getName());
 	
@@ -113,6 +115,7 @@ public class SerialGPSComponent extends JDialog {
 				if (serialConfig.getSerialInterface().isCTS()) gpsInterface.startGPS();
 			}
         } else {
+        	defaultPosition = gpsInterface.getPosition();
         	isOnLine = false;
         	gpsInterface.shutDown();
         }
@@ -123,6 +126,16 @@ public class SerialGPSComponent extends JDialog {
     }
     
     private void configureListeners() {
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent event) {
+            	if (WindowEvent.WINDOW_CLOSING == event.getID()) {
+            		userPref.putDouble("DefaultLongitude", defaultPosition.x);
+            		userPref.putDouble("DefaultLatitude", defaultPosition.y);
+            	}   
+            }
+        });
+    	
     	okButton.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent event) {
@@ -357,7 +370,7 @@ public class SerialGPSComponent extends JDialog {
     private void initializeDevice(int device) {
         switch (device) {
             case 0:
-                gpsInterface = new CF30GPSReceiver();
+                gpsInterface = new CF30GPSReceiver(defaultPosition);
                 break;
         }
     }
@@ -462,6 +475,8 @@ public class SerialGPSComponent extends JDialog {
         startGpsWithSystem = userPref.getBoolean("StartGpsWithSystem", false);
         centerMapOnGPSPosition = userPref.getBoolean("CenterMapOnGPSPosition", false);
         reportGPSCircularRedundancyCheckFailures = userPref.getBoolean("ReportGPSCircularRedundancyCheckFailures", true);
+		defaultPosition.x = userPref.getDouble("DefaultLongitude", -86.0);
+		defaultPosition.y = userPref.getDouble("DefaultLatitude", 40.0);
 		gpsSymbolRadius = userPref.getDouble("GPSSymbolRadius", 5d);
     }
     
@@ -485,6 +500,8 @@ public class SerialGPSComponent extends JDialog {
         userPref.putBoolean("CenterMapOnGPSPosition", centerMapOnGPSPosition);
         userPref.putBoolean("ReportGPSCircularRedundancyCheckFailures", reportGPSCircularRedundancyCheckFailures);
 		userPref.putDouble("GPSSymbolRadius", gpsSymbolRadius);
+		userPref.putDouble("DefaultLongitude", defaultPosition.x);
+		userPref.putDouble("DefaultLatitude", defaultPosition.y);
     }
     
     private void applyButtonActionListenerEvent(ActionEvent event) {

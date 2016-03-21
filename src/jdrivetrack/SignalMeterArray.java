@@ -5,7 +5,7 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
-
+import java.util.Arrays;
 import javax.swing.JPanel;
 
 public class SignalMeterArray extends JPanel {
@@ -13,31 +13,36 @@ public class SignalMeterArray extends JPanel {
 	
 	private Rectangle[] meter = new Rectangle[10];
 	private Rectangle[] frame = new Rectangle[10];
-	private int[] meterLevel = new int[10];
+	private Integer[] meterLevel = new Integer[10];
 	private Color[] meterColor = new Color[10];
 	
 	public SignalMeterArray() {
 		for (int i = 0; i < meter.length; i++) {
 			meter[i] = new Rectangle();
 			frame[i] = new Rectangle();
+			meterLevel[i] = 0;
+			meterColor[i] = Color.LIGHT_GRAY;
 		}
 	}
 
-	public void setMeterLevel(int[] level) {
-		for (int i = 0; i < meter.length; i++) {
-			meterLevel[i] = level[i];
+	public void setMeterLevels(Integer[] percent) {
+		for (int i = 0; i < 10; i++) {
+			meterLevel[i] = Math.max(Math.min(percent[i], 100), 0);
 		}
 		repaint();
 	}
 	
-	public void setMeterLevel(int level) {
-		for (int i = 0; i < meter.length; i++) {
-			meterLevel[i] = level;
-		}
+	public void setMeterLevels(Integer percent) {
+		Arrays.fill(meterLevel, Math.max(Math.min(percent, 100), 0));
 		repaint();
 	}
 	
-	public void setMeterColor(Color[] color) {
+	public void setMeterLevel(int index, int percent) {
+		meterLevel[index] = Math.max(Math.min(percent, 100), 0);
+		repaint();
+	}
+
+	public void setMeterColors(Color[] color) {
 		for (int i = 0; i < meter.length; i++) {
 			meterColor[i] = color[i];
 		}
@@ -49,15 +54,10 @@ public class SignalMeterArray extends JPanel {
 			meterColor[i] = color;
 		}
 		repaint();
-	}
-	
-	public void setMeterLevel(int index, int level) {
-		meterLevel[index] = level;
-		repaint();
 	}		
 
 	public void setMeterColor(int index, Color color) {
-		meterColor[index] = color;
+		meterColor[Math.max(Math.min(index, 9), 0)] = color;
 		repaint();
 	}
 
@@ -82,5 +82,5 @@ public class SignalMeterArray extends JPanel {
 			g2.dispose();
 		}
 	}
-
+	
 }

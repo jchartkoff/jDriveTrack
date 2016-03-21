@@ -32,6 +32,9 @@ import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 
 import interfaces.MapInterface;
+import types.GeoTile;
+import types.MapDimension;
+import types.StaticMeasurement;
 
 public class ImageMap extends JPanel implements MapInterface, Cloneable {
 	private static final long serialVersionUID = 1L;
@@ -40,7 +43,7 @@ public class ImageMap extends JPanel implements MapInterface, Cloneable {
 	private double gpsDotSize;
 	private Dot gpsDot;
 	private Ring targetRing;
-	private Arrow gpsArrow;
+	private Arrow2D gpsArrow;
 	private boolean showGpsSymbol = false;
 	private boolean showTargetRing = false;
 	private Point.Double gpsDotPosition = new Point.Double();
@@ -126,7 +129,7 @@ public class ImageMap extends JPanel implements MapInterface, Cloneable {
 		iconList = new ArrayList<>();
 		quadList = new ArrayList<>();
 		gpsDot = new Dot(mapSize);
-		gpsArrow = new Arrow(mapSize);
+		gpsArrow = new Arrow2D(mapSize);
 		targetRing = new Ring(mapSize);
 		
 		userPref = Preferences.userRoot().node(this.getClass().getName());
@@ -195,7 +198,7 @@ public class ImageMap extends JPanel implements MapInterface, Cloneable {
 	}
 	
 	@Override
-	public void setGridSize(Point.Double gridSize) {
+	public void setTileSize(Point.Double gridSize) {
 		this.gridSize = gridSize;
 		repaint();
 	}
@@ -1136,25 +1139,25 @@ public class ImageMap extends JPanel implements MapInterface, Cloneable {
 	}
 
 	@Override
-	public void deletePolygon(int index) throws IndexOutOfBoundsException {
+	public void deleteTestTile(int index) throws IndexOutOfBoundsException {
 		// TODO Auto-generated method stub
 		
 	}
 
 	@Override
-	public void setPolygonVisible(int index, boolean isVisible) {
+	public void setTestTileVisible(int index, boolean isVisible) {
 		// TODO Auto-generated method stub
 		
 	}
 
 	@Override
-	public void changePolygonColor(int index, Color color) throws IndexOutOfBoundsException {
+	public void changeTestTileColor(int index, Color color) throws IndexOutOfBoundsException {
 		// TODO Auto-generated method stub
 		
 	}
 
 	@Override
-	public void deleteAllPolygons() {
+	public void deleteAllTestTiles() {
 		// TODO Auto-generated method stub
 		
 	}

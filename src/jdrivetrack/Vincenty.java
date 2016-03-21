@@ -15,6 +15,20 @@ public class Vincenty {  // WGS-84
 	public static final double FLATTENING_INVERSE = 298.2572229328697;
 	public static final double FEET_PER_METER = 3.2808398950131234;
 	public static final double FEET_PER_MILE = 5280.0;
+	public static final double secondsPerJulianYear = 316880878;
+	public static final double secondsPerSiderealYear = 31471982.4751328304;
+	public static final double minutesPerJulianYear = 5281347.966666667;
+	public static final double daysPerJulianYear = 365.25;
+	public static final double daysPerGregorianYear = 365.2425;
+	public static final double daysPerSiderealYear = 365.25636;
+	public static final double daysPerTropicalYear = 365.242190402;
+	public static final double hoursPerSidrealDay = 23.9344699;
+	public static final double secondsPerSidrealDay = 86164.09053;
+	public static final double hoursPerSolarDay = 24.0;
+	public static final double minutesPerHour = 60.0;
+	public static final double secondsPerMinute = 60.0;
+	public static final double millisPerSecond = 1000.0;
+	public static final double yearsUnixTimeAheadOfNTFSEpoc = 369.0;
 	
 	private static void validateLatitude(double latitude) throws IllegalArgumentException {
 		if (latitude < -90.0 || latitude > 90.0)
@@ -36,9 +50,14 @@ public class Vincenty {  // WGS-84
 			throw new IllegalArgumentException("Longitude = " + point.x + " / Latitude = " + point.y);
 	}
 	
-	private static void validateBearing(double bearing) throws IllegalArgumentException {
-		if (bearing >= 360.0 || bearing <= -360.0) 
-			throw new IllegalArgumentException("Bearing = " + bearing + " degrees");
+	private static double validateBearing(double bearing) {
+		while (bearing > 360.0) {
+			bearing -= 360.0;
+		}
+		while (bearing < 0) {
+			bearing += 360.0;
+		}
+		return bearing;
 	}
 	
 	public static double degreesToArcSeconds(double degrees) throws IllegalArgumentException {
@@ -233,14 +252,14 @@ public class Vincenty {  // WGS-84
 	
 	public static DirectPoint getVincentyDirect(Point.Double p1, double initialBearing, double distance) throws IllegalArgumentException {
 		validateLonLat(p1);
-		validateBearing(initialBearing);
+		double bearing = validateBearing(initialBearing);
 		if (distance <= 0.0) throw new IllegalArgumentException("Distance = " + distance + " meters");
 		
 	    DirectPoint directPoint = new DirectPoint(new Point.Double(), 0.0);
 		
 		double φ1 = Math.toRadians(p1.y);
 	    double λ1 = Math.toRadians(p1.x);
-	    double α1 = Math.toRadians(initialBearing);
+	    double α1 = Math.toRadians(bearing);
 	    double s = distance;
 
 	    double a = EQUATORIAL_RADIUS;

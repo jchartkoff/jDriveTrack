@@ -46,10 +46,14 @@ public class CF30GPSReceiver implements GPSInterface {
 	private Point.Double prePosition = null;
 	private boolean enableEvents = false;
 	private boolean reportCRCErrors = false;
+	private Point.Double defaultPosition = null;
+	private boolean continuousUpdate = false;
 	
 	private PropertyChangeSupport pcs = new PropertyChangeSupport(this);
 
-	public CF30GPSReceiver() {}
+	public CF30GPSReceiver(Point.Double defaultPosition) {
+		this.defaultPosition = defaultPosition;
+	}
 	
 	@Override
 	public void startGPS() {
@@ -60,6 +64,11 @@ public class CF30GPSReceiver implements GPSInterface {
 		} else {
 			pcs.firePropertyChange(FIX_QUALITY, null, FixQuality.OFF_LINE);
 		}
+	}
+	
+	@Override
+	public void enableContinuousUpdate(boolean continuousUpdate) {
+		this.continuousUpdate = continuousUpdate;
 	}
 	
 	@Override
@@ -143,7 +152,9 @@ public class CF30GPSReceiver implements GPSInterface {
 
 	@Override
 	public Point.Double getPosition() {
-		return position;
+		if (position != null && validFix) return position;
+		if (position == null && !validFix) return defaultPosition;
+		return null;
 	}
 
 	@Override
@@ -303,7 +314,7 @@ public class CF30GPSReceiver implements GPSInterface {
 									+ (Double.parseDouble(a[5].substring(3)) * 16666.6666667);
 							if (a[6].equals("W"))
 								lon = -lon;
-							position = new Point.Double(lon / 1000000, lat / 1000000);
+							if (validFix) position = new Point.Double(lon / 1000000, lat / 1000000);
 						}
 
 						if (a[2].equals("A")) {
@@ -353,7 +364,7 @@ public class CF30GPSReceiver implements GPSInterface {
 									+ (Double.parseDouble(a[4].substring(3)) * 16666.6666667);
 							if (a[5].equals("W"))
 								lon = -lon;
-							position = new Point.Double(lon / 1000000.0, lat / 1000000.0);
+							if (validFix) position = new Point.Double(lon / 1000000.0, lat / 1000000.0);
 						}
 						
 						if (a[6].length() != 0) {
@@ -386,11 +397,11 @@ public class CF30GPSReceiver implements GPSInterface {
 						}
 					}
 					
-					if (position != null && prePosition != null && Math.abs(prePosition.distance(position)) > 0.000003) {
+					if (!continuousUpdate && position != null && prePosition != null && Math.abs(prePosition.distance(position)) > 0.000003) {
 						if (enableEvents) pcs.firePropertyChange(VALID_POSITION, prePosition, position);
 					}
 					
-					if (position != null && prePosition == null) {
+					if (position != null && (continuousUpdate || prePosition == null)) {
 						if (enableEvents) pcs.firePropertyChange(VALID_POSITION, null, position);
 					}
 					
@@ -443,12 +454,12 @@ public class CF30GPSReceiver implements GPSInterface {
 
 	@Override
 	public String getUTMCoordinates() {
-		return CoordinateUtils.latLonToUTM(position).toString();
+		return CoordinateUtils.lonLatToUTM(position).toString().toUpperCase();
 	}
 	
 	@Override
 	public String getMGRSLocation() {
-		return CoordinateUtils.latLonToMGRS(position, 5).toString();
+		return CoordinateUtils.lonLatToMGRS(position, 5).toString().toUpperCase();
 	}
 	
     private FixQuality getFixQuality(String fq) {

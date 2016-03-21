@@ -34,6 +34,7 @@ public class Sinad extends Thread {
 	private double m_sinadFinal = 0;
 	private double sinadAvg = 0;
 	private int avg = 0;
+	private boolean sinadRun = true;
 	private PropertyChangeSupport pcs = new PropertyChangeSupport(this);
 	
 	public Sinad() {
@@ -66,6 +67,7 @@ public class Sinad extends Thread {
 		line.stop();
 		line.drain();
 		line.close();
+		sinadRun = false;
 	}
 	
 	public double getSINAD() {
@@ -88,8 +90,7 @@ public class Sinad extends Thread {
 	public void run() {
 		int nBytesRead = 0;
         byte[] abData = new byte[EXTERNAL_BUFFER_SIZE];
-        while (nBytesRead != -1) {
-        	
+        while (nBytesRead != -1 && sinadRun) {
         	try {
         		nBytesRead = audioInputStream.read(abData, 0, abData.length);
         	} catch (Exception ex) {

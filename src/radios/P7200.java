@@ -17,9 +17,9 @@ import javax.swing.SwingUtilities;
 
 import jdrivetrack.Calibrate;
 import jdrivetrack.CalibrationDataObject;
-import jdrivetrack.EmissionDesignator;
 import interfaces.RadioInterface;
 import jssc.SerialPort;
+import types.EmissionDesignator;
 
 public class P7200 implements RadioInterface {
 	private static final int BAUD_RATE = SerialPort.BAUDRATE_38400;

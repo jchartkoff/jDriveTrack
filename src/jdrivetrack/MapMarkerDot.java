@@ -2,6 +2,10 @@ package jdrivetrack;
 
 import java.awt.Color;
 
+import types.Coordinate;
+import types.Layer;
+import types.Style;
+
 public class MapMarkerDot extends MapMarkerCircle {
 
     public static final int DOT_RADIUS = 5;

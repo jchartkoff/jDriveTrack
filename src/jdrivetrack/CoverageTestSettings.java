@@ -46,6 +46,9 @@ import javax.swing.colorchooser.AbstractColorChooserPanel;
 
 public class CoverageTestSettings extends JDialog {
 	private static final long serialVersionUID = -8082024979568837913L;
+	
+	public static final String PROPERTY_CHANGE = "PROPERTY_CHANGE";
+	
 	private static final Double DEFAULT_TEST_GRID_TOP_EDGE = 39.0;
 	private static final Double DEFAULT_TEST_GRID_BOTTOM_EDGE = 32.0;
 	private static final Double DEFAULT_TEST_GRID_LEFT_EDGE = -88.0;
@@ -117,6 +120,7 @@ public class CoverageTestSettings extends JDialog {
 	private int signalQualityDisplayMode;
 	private ButtonModel signalQualityDisplayModeModel;
 	private ButtonModel earthShapeModel;
+	private int channelDisplay;
 	
     private JPanel mapImageModelPanel;
     private JToggleButton pickUpperLeftCornerButton;
@@ -232,7 +236,7 @@ public class CoverageTestSettings extends JDialog {
 	private NumberFormat widthFormat;
 	private double degreesLatitude = 35.0;
 	
-	private Preferences systemPrefs = Preferences.systemRoot().node("jdrivetrack/prefs/CoverageTestSettings");
+	private Preferences systemPrefs = Preferences.userRoot().node("jdrivetrack/prefs/CoverageTestSettings");
 	
 	public CoverageTestSettings(boolean clearAllPrefs) {
 		if (clearAllPrefs) {
@@ -450,9 +454,13 @@ public class CoverageTestSettings extends JDialog {
         jTextField25ber.setCursor(new Cursor(Cursor.DEFAULT_CURSOR));
         jTextField30ber.setEditable(false);
         jTextField30ber.setCursor(new Cursor(Cursor.DEFAULT_CURSOR));
+        
         testGridPanel = new JPanel();
+        
         testGridDimensionPanel = new JPanel();
+        
         gridEdgeWidth = new JFormattedTextField();
+        
         gridEdgeWidthLabel = new JLabel();
         mapImageModelPanel = new JPanel();
         gridEdgeTop = new JFormattedTextField();
@@ -1095,7 +1103,7 @@ public class CoverageTestSettings extends JDialog {
 				jccDialog.setVisible(false);
 			}
 		});
-
+		
         tileSelectionModeButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
                 tileSelectionModeButtonActionPerformed(event);
@@ -1356,15 +1364,7 @@ public class CoverageTestSettings extends JDialog {
     private void tileSelectionModeButtonActionPerformed(ActionEvent event) {                                                        
         // TODO add your handling code here:
     } 
-    
-    private void testGridWidthTextFieldActionPerformed(ActionEvent event) {                                                       
-        // TODO add your handling code here:
-    }                                                      
 
-    private void testGridHeightTextFieldActionPerformed(ActionEvent event) {                                                        
-        // TODO add your handling code here:
-    }                                                     
-    
     private boolean validateWidth() {
     	gridWidth = Double.parseDouble(gridEdgeWidth.getText());
 		gridEdgeWidth.setText(widthFormat.format(gridWidth));
@@ -2148,6 +2148,7 @@ public class CoverageTestSettings extends JDialog {
 	}
 
 	private void getSettingsFromRegistry() {
+		channelDisplay = systemPrefs.getInt("ChannelDisplay", 0);
 		earthShapeModelIndex = systemPrefs.getInt("EarthShapeModelIndex", 1);
 		dotsPerTileIndex = systemPrefs.getInt("DotsPerTileIndex", 5);
 		tileSizeIndex = systemPrefs.getInt("SizeOfTileArcSeconds", 6);
@@ -2159,7 +2160,7 @@ public class CoverageTestSettings extends JDialog {
 		showQuads = systemPrefs.getBoolean("ShowQuads", true);
 		showLines = systemPrefs.getBoolean("ShowLines", true);
 		sampleTimingMode = systemPrefs.getInt("SampleTimingMode", 1);
-		signalQualityDisplayMode = systemPrefs.getInt("SignalQualityDisplayMode", 1);
+		signalQualityDisplayMode = systemPrefs.getInt("SignalQualityDisplayMode", -1);
 		manualDataCollectionMode = systemPrefs.getInt("ManualDataCollectionMode", 0);
 		sampleRSSI = systemPrefs.getBoolean("SampleRSSI", false);
 		sampleBER = systemPrefs.getBoolean("SampleBER", false);
@@ -2248,10 +2249,11 @@ public class CoverageTestSettings extends JDialog {
 		systemPrefs.putDouble("GridEdgeRight", edgeRefRight);
 		systemPrefs.putDouble("GridEdgeTop", edgeRefTop);
 		systemPrefs.putDouble("GridEdgeLeft", edgeRefLeft);
+		systemPrefs.putInt("ChannelDisplay", channelDisplay);
 		
 		updateComponents();
 		
-		firePropertyChange("PROPERTY_CHANGE", null, null);
+		firePropertyChange(PROPERTY_CHANGE, null, null);
 	}
 
 	private void setTileShapeValues(double degreesLatitude) {
@@ -2633,7 +2635,13 @@ public class CoverageTestSettings extends JDialog {
 	}
 	
 	public Point.Double getGridReference() {
-		return new Point.Double(edgeRefRight, edgeRefTop);
+		return new Point.Double(edgeRefLeft, edgeRefTop);
+	}
+	
+	public void setGridReference(Point.Double edgeRef) {
+		edgeRefLeft = edgeRef.x;
+		edgeRefTop = edgeRef.y;
+		updateComponents();
 	}
 	
 	public void setControlsEnabled(boolean enabled) {
@@ -2653,6 +2661,16 @@ public class CoverageTestSettings extends JDialog {
 		this.maxSamplesPerTile = maxSamplesPerTile;
 	}
 	
+	public void setMinSamplesPerTileIndex(int minSamplesPerTileIndex) {
+		this.minSamplesPerTileIndex = minSamplesPerTileIndex;
+		updateComponents();
+	}
+	
+	public void setMaxSamplesPerTileIndex(int maxSamplesPerTileIndex) {
+		this.maxSamplesPerTileIndex = maxSamplesPerTileIndex;
+		updateComponents();
+	}
+	
 	public boolean isSinadSamplingInEffect() {
 		return sampleSINAD;
 	}
@@ -2669,6 +2687,11 @@ public class CoverageTestSettings extends JDialog {
 		return sampleTimingMode;
 	}
 	
+	public void setSampleTimingMode(int sampleTimingMode) {
+		this.sampleTimingMode = sampleTimingMode;
+		updateComponents();
+	}
+	
 	public double getSignalMarkerRadius() {
 		return signalMarkerRadius;
 	}
@@ -2681,16 +2704,53 @@ public class CoverageTestSettings extends JDialog {
 		return signalQualityDisplayMode;
 	}
 	
+	public boolean isShowSignalMarkers() {
+		if (signalQualityDisplayMode == -1) return false;
+		return true;
+	}
+	
 	public int getDotsPerTile() {
 		return dotsPerTile;
 	}
-
+	
+	public int getDotsPerTileIndex() {
+		return dotsPerTileIndex;
+	}
+	
+	public void setDotsPerTile(int dotsPerTile) {
+		this.dotsPerTile = dotsPerTile;
+	}
+	
+	public void setDotsPerTileIndex(int dotsPerTileIndex) {
+		this.dotsPerTileIndex = dotsPerTileIndex;
+		updateComponents();
+	}
+	
 	public Point.Double getTileSizeArcSeconds(double degreesLatitude) {
 		this.degreesLatitude = degreesLatitude;
 		setTileShapeValues(degreesLatitude);
 		return tileSizeArcSeconds;
 	}
-
+	
+	public int getTileSizeIndex() {
+		return tileSizeIndex;
+	}
+	
+	public void setTileSizeIndex(int tileSizeIndex) {
+		this.tileSizeIndex = tileSizeIndex;
+		updateComponents();
+	}
+	
+	public Point.Double getGridSize() {
+		return new Point.Double(gridWidth, gridHeight);
+	}
+	
+	public void setGridSize(Point.Double gridSize) {
+		gridWidth = gridSize.x;
+		gridHeight = gridSize.y;
+		updateComponents();
+	}
+	
 	public int getMinSamplesPerTile() {
 		return minSamplesPerTile;
 	}
@@ -2698,13 +2758,25 @@ public class CoverageTestSettings extends JDialog {
 	public int getMaxSamplesPerTile() {
 		return maxSamplesPerTile;
 	}
+	
+	public int getMinSamplesPerTileIndex() {
+		return minSamplesPerTileIndex;
+	}
 
+	public int getMaxSamplesPerTileIndex() {
+		return maxSamplesPerTileIndex;
+	}
+	
 	public boolean isAlertOnMinimumSamplesPerTileAcquired() {
 		return alertOnMinimumSamplesPerTileAcquired;
 	}
 
 	public boolean isShowGridSquareShading() {
 		return showGridSquareShading;
+	}
+	
+	public int getChannelDisplay() { //TODO: add selector box in GUI
+		return channelDisplay;
 	}
 	
 	public boolean isShowRings() {
@@ -2721,6 +2793,11 @@ public class CoverageTestSettings extends JDialog {
 	
 	public int getMinTimePerTile() {
 		return minTimePerTile;
+	}
+	
+	public void setMinTimePerTile(int minTimePerTile) {
+		this.minTimePerTile = minTimePerTile;
+		updateComponents();
 	}
 	
 	public void setDegreesLatitude(double degreesLatitude) {

@@ -2,6 +2,9 @@ package jdrivetrack;
 
 import java.util.List;
 
+import types.Layer;
+import types.Style;
+
 public class LayerGroup extends AbstractLayer{
     private List<AbstractLayer> layers;
 

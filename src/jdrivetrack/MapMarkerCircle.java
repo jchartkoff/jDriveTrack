@@ -6,8 +6,12 @@ import java.awt.Composite;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
+import java.awt.geom.Point2D;
 
 import interfaces.MapMarker;
+import types.Coordinate;
+import types.Layer;
+import types.Style;
 
 public class MapMarkerCircle extends MapObjectImpl implements MapMarker {
 
@@ -114,4 +118,10 @@ public class MapMarkerCircle extends MapObjectImpl implements MapMarker {
         if (coord == null) coord = new Coordinate(0, lon);
         else coord.setLon(lon);
     }
+
+	@Override
+	public Point2D.Double getLonLat() {
+		return new Point2D.Double(coord.getLon(), coord.getLat());
+	}
+
 }

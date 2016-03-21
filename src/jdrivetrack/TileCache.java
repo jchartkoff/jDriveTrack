@@ -1,7 +1,6 @@
 package jdrivetrack;
 
 import java.awt.image.BufferedImage;
-import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
 import java.io.File;
@@ -14,69 +13,73 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.logging.Logger;
 
 import javax.imageio.ImageIO;
-import javax.swing.SwingWorker;
+
+import org.joda.time.DateTime;
+import org.joda.time.DateTimeZone;
+import org.joda.time.Duration;
 
 import interfaces.TileSource;
+
 import tilesources.BingAerialTileSource;
 import tilesources.MapQuestOpenAerialTileSource;
 import tilesources.MapQuestOsmTileSource;
 import tilesources.OsmTileSource;
+import types.Tile;
 
-public class TileCache implements PropertyChangeListener {
-	public static final String PROGRESS = "PROGRESS";
-	public static final String RESTORED = "RESTORE";
+public class TileCache {
+	public enum Progress {UPDATE, RESTORED}
 	
 	private static Semaphore semaphore = new Semaphore(1);
 	private static final int DEFAULT_MAX_CACHE_SIZE = 128;
 	private static final int DEFAULT_MAX_FILE_COUNT = 4096;
-	private static final long FILE_AGE_90_DAYS = 3600000 * 24 * 90 * -1;
+	private static final long MAX_FILE_DAYS = 35;
     private static final Logger log = Logger.getLogger(TileCache.class.getName());
-    private static final String DEFAULT_DIRECTORY_PATH = System.getProperty("user.home") + 
-			File.separator + "drivetrack" + File.separator + "cache";
+    private static final File DEFAULT_DIRECTORY_PATH = new File(System.getProperty("user.home") + 
+			File.separator + "drivetrack" + File.separator + "cache");
     
     private int cacheSize;
     private long maxFileAge;
     private int maxFileCount;
-    private RestoreDiskCache restoreDiskCache;
     private final Map<String, CacheEntry> hash;
     private final CacheLinkedListElement lruTiles;
-	private String fileDirectoryPath;
+	private File fileDirectoryPath;
+	private boolean canceled = false;
 	
 	private PropertyChangeSupport pcs = new PropertyChangeSupport(this);
-	
+
 	public TileCache() {
-		this(DEFAULT_MAX_CACHE_SIZE, DEFAULT_MAX_FILE_COUNT, FILE_AGE_90_DAYS, DEFAULT_DIRECTORY_PATH);
+		this(DEFAULT_MAX_CACHE_SIZE, DEFAULT_MAX_FILE_COUNT, MAX_FILE_DAYS, DEFAULT_DIRECTORY_PATH);
 	}
-	
-    public TileCache(String fileDirectoryPath) {
-    	this(DEFAULT_MAX_CACHE_SIZE, DEFAULT_MAX_FILE_COUNT, FILE_AGE_90_DAYS, fileDirectoryPath);
+
+    public TileCache(File fileDirectoryPath) {
+    	this(DEFAULT_MAX_CACHE_SIZE, DEFAULT_MAX_FILE_COUNT, MAX_FILE_DAYS, fileDirectoryPath);
     }
 	
-    public TileCache(int maxCacheSize, int maxFileCount, long maxFileAge, String fileDirectoryPath) {
-        this.cacheSize = maxCacheSize;
+    public TileCache(int maxCacheSize, int maxFileCount, long maxFileAge, File fileDirectoryPath) {
+    	this.cacheSize = maxCacheSize;
         this.maxFileCount = maxFileCount;
         this.fileDirectoryPath = fileDirectoryPath;
     	this.maxFileAge = maxFileAge;
         hash = Collections.synchronizedMap(new LinkedHashMap<>(maxCacheSize));
         lruTiles = new CacheLinkedListElement();
-    	if (maxFileAge > 0) {
-			makeDirectoryPath(fileDirectoryPath);
-    	}
+    	if (maxFileAge > 0) makeDirectoryPath(fileDirectoryPath);
+    	updateMonitor(5);
     }
 
-    private void makeDirectoryPath(String fileDirectoryPath) {
-    	File directory = new File(fileDirectoryPath);
-		if (!directory.exists()) new File(fileDirectoryPath).mkdirs();
+    private void makeDirectoryPath(File fileDirectoryPath) {
+		if (!fileDirectoryPath.exists()) fileDirectoryPath.mkdirs();
 		this.fileDirectoryPath = fileDirectoryPath;
     }
     
@@ -89,7 +92,7 @@ public class TileCache implements PropertyChangeListener {
             }
         }
     }
-    
+
     public Tile getTile(TileSource source, int x, int y, int z) {
     	String tileKey = Tile.getTileKey(source, x, y, z);
         CacheEntry entry = hash.get(tileKey);
@@ -98,26 +101,34 @@ public class TileCache implements PropertyChangeListener {
 				BufferedImage bufferedImage = null;
 				try {
 					semaphore.acquire();
-					String encodedFileName = fileDirectoryPath + File.separator + fileNameEncoder(tileKey);
-					bufferedImage = ImageIO.read(new File(encodedFileName));
-				} catch (IOException | InterruptedException ex) {
+					File encodedFileName = new File(fileDirectoryPath + File.separator + fileNameEncoder(tileKey));
+					try {
+						bufferedImage = ImageIO.read(encodedFileName);
+					} catch (ArrayIndexOutOfBoundsException ex) {
+						System.err.println("ImageIO read fault occured reading file: " + encodedFileName.getPath());
+	        		}
+					if (bufferedImage != null) {
+						Tile tile = new Tile(source, x, y, z, bufferedImage);
+						addTile(tile);
+						entry = hash.get(tileKey);
+					}
+				} catch (IOException ex) {
+					ex.printStackTrace();
+				} catch (InterruptedException ex) {
 					ex.printStackTrace();
 				} finally {
 					semaphore.release();
 				}
-				if (bufferedImage != null) {
-					Tile tile = new Tile(source, x, y, z, bufferedImage);
-					addTile(tile);
-					entry = hash.get(tileKey);
-				}
         	} else {
         		return null;
         	}
-        }
-        lruTiles.moveElementToFirstPos(entry);
-        return entry.tile;
-    }
-    
+			return null;
+		} 
+    	lruTiles.moveElementToFirstPos(entry);
+    	entry.tile.setLoaded(true);
+    	return entry.tile;
+    }  
+
     private void removeOldEntries() {
         try {
             while (lruTiles.getElementCount() > cacheSize) {
@@ -228,86 +239,80 @@ public class TileCache implements PropertyChangeListener {
             return firstElement;
         }
     }
-
-    public void cancel(boolean mayInterruptIfRunning) {
-    	restoreDiskCache.cancel(mayInterruptIfRunning);
+    
+    private void updateMonitor(int progress) {
+        pcs.firePropertyChange(Progress.UPDATE.toString(), null, progress);
+    }
+    
+    public void cancel() {
+    	canceled = true;
     }
     
     public void restoreDiskCache() {
-    	restoreDiskCache = new RestoreDiskCache(fileDirectoryPath, cacheSize, maxFileCount);
-    	restoreDiskCache.addPropertyChangeListener(this);
-    	restoreDiskCache.execute();
+    	new Thread(new RestoreDiskCache(fileDirectoryPath, cacheSize, maxFileCount)).start();
     }
     
-	private class RestoreDiskCache extends SwingWorker<Integer, Integer> {
-		private String fileDirectoryPath;
+	private class RestoreDiskCache implements Runnable {
+		private File fileDirectoryPath;
 		private int maxCacheSize;
 		private int maxFileCount;
-		private RestoreDiskCache(String fileDirectoryPath, int maxCacheSize, int maxFileCount) {
+		private int numberRestored = 0;
+		private int numberTilesToBeRestored = 0;
+		
+		private RestoreDiskCache(File fileDirectoryPath, int maxCacheSize, int maxFileCount) {
 			this.fileDirectoryPath = fileDirectoryPath;
 			this.maxCacheSize = maxCacheSize;
 			this.maxFileCount = maxFileCount;
 		}
+		
 		@Override
-		public Integer doInBackground() {
-			int numberOfTilesRestored = 0;
-			int numberOfTilesToBeRestored = 0;
-			int progress = 0;
-            setProgress(0);
+		public void run() {
+            canceled = false;
 			try {
 				semaphore.acquire();
-	 			File[] imageFiles = indexedRecordsByAccessTime(fileDirectoryPath);
-				numberOfTilesToBeRestored = Math.min(imageFiles.length, Math.min(maxCacheSize, maxFileCount));
+	 			List<File> imageFiles = byAccessTime(fileDirectoryPath);
+				numberTilesToBeRestored = Math.min(imageFiles.size(), Math.min(maxCacheSize, maxFileCount));
 				if (imageFiles != null) {
 					for (File file : imageFiles) {
-						if (isCancelled()) return numberOfTilesRestored;
+						if (canceled) break;
 						if (file.isFile()) {
 							String decodedFileName = URLDecoder.decode(file.getName(), "UTF-8");
 							ParsedTileKey ptk = new ParsedTileKey(decodedFileName);
-							BufferedImage bufferedImage = null;
+							BufferedImage bimg = null;
 							try {
-								bufferedImage = ImageIO.read(file);
-							} catch (IOException ex) {
-								System.err.println("Error reading file from disk cache");
+								bimg = ImageIO.read(file);
+							} catch (ArrayIndexOutOfBoundsException ex) {
+								System.err.println("ImageIO read fault occured on file: " + file.getPath());
+								boolean deleted = file.delete();
+								System.err.println("corrupt file successfully deleted: " + deleted);
 							}
-							if (bufferedImage != null) {
-								Tile tile = new Tile(ptk.getTileSource(), ptk.getX(), ptk.getY(), ptk.getZoom(), bufferedImage);
+							if (bimg != null) {
+								Tile tile = new Tile(ptk.getTileSource(), ptk.getX(), ptk.getY(), ptk.getZoom(), bimg);
 								addTile(tile);
-								numberOfTilesRestored++;
-								progress = (int) ((numberOfTilesRestored / (double) numberOfTilesToBeRestored) * 100);
-								setProgress((int) Math.min(progress, 100d));
-								if (numberOfTilesRestored >= numberOfTilesToBeRestored) return numberOfTilesRestored;
+								numberRestored++;
 							}
+							int progress = 5 + (int) ((numberRestored / (double) numberTilesToBeRestored) * 95);
+							updateMonitor((int) Math.min(progress, 100d));
 						}
+						if (numberRestored == numberTilesToBeRestored) break;
 				    }
 				}
-				
-			} catch (InterruptedException | UnsupportedEncodingException | CancellationException ex) {
-				ex.printStackTrace();
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			} catch (CancellationException e) {
+				e.printStackTrace();
+			} catch (UnsupportedEncodingException e) {
+				e.printStackTrace();
+			} catch (IOException e) {
+				e.printStackTrace();
 			} finally {
+				canceled = false;
 				semaphore.release();
 			}
-			return numberOfTilesRestored;
-		}
-		@Override
-		protected void done() {
-			try {
-				firePropertyChange(RESTORED, null, get());
-			} catch (InterruptedException | ExecutionException | CancellationException e) {
-				e.printStackTrace();
-			}
+			updateMonitor(100);
+	        pcs.firePropertyChange(Progress.RESTORED.toString(), null, numberRestored);
 		}
     }
-	
-	@Override
-	public void propertyChange(PropertyChangeEvent event) {
-		if ("progress".equals(event.getPropertyName())) {
-			pcs.firePropertyChange(PROGRESS, null, event.getNewValue());
-        } 
-		if (RESTORED.equals(event.getPropertyName())) {
-			pcs.firePropertyChange(RESTORED, null, event.getNewValue());
-		}
-	}
 	
 	public void addPropertyChangeListener(PropertyChangeListener listener) {
         pcs.addPropertyChangeListener(listener);
@@ -318,7 +323,7 @@ public class TileCache implements PropertyChangeListener {
     }
 
 	public int getTileCountOnDisk() {
-		File[] imageFiles = new File(fileDirectoryPath).listFiles();
+		File[] imageFiles = fileDirectoryPath.listFiles();
 		return imageFiles.length;
 	}
 	
@@ -328,10 +333,10 @@ public class TileCache implements PropertyChangeListener {
 	
 	private class SaveToFile implements Runnable {
 		private Tile tile;
-		private String fileDirectoryPath;
+		private File fileDirectoryPath;
 		private long maxFileAge;
 		private int maxFileCount;
-		private SaveToFile(Tile tile, String fileDirectoryPath, long maxFileAge, int maxFileCount) {
+		private SaveToFile(Tile tile, File fileDirectoryPath, long maxFileAge, int maxFileCount) {
 			this.tile = tile;
 			this.fileDirectoryPath = fileDirectoryPath;
 			this.maxFileAge = maxFileAge;
@@ -339,29 +344,29 @@ public class TileCache implements PropertyChangeListener {
 		}
 		@Override
 		public void run() {
-			String fileName = null;
+			File fileName = null;
 			try {
-	    		fileName = fileDirectoryPath + File.separator + fileNameEncoder(tile.getKey());
-	    		Path filePath = Paths.get(fileName);
+	    		fileName = new File (fileDirectoryPath + File.separator + fileNameEncoder(tile.getKey()));
+	    		Path filePath = Paths.get(fileName.toURI());
 	    		if (Files.exists(filePath)) {
-	    			if (System.currentTimeMillis() - fileCreationTime(fileName) > maxFileAge) {	
+	    			if (getAgeOfFile(fileName).getStandardDays() > maxFileAge) {	
+	    				File replacementFile = fileName;
 	    				semaphore.acquire();
-	    				if (new File(fileName).delete()) {
-		    				File outputfile = new File(fileName);
-		    				ImageIO.write(tile.getImage(), "jpg", outputfile);
+	    				if (fileName.delete()) {
+		    				ImageIO.write(tile.getImage(), "jpg", replacementFile);
 		    				addTile(tile);
-	    				}
+			    		} else {
+			    			int tileCountOnDisk = getTileCountOnDisk();
+			    			if (tileCountOnDisk >= maxFileCount) semaphore.acquire();
+			    			List<File> imageFiles = byAccessTime(fileDirectoryPath);
+			    			while(tileCountOnDisk >= maxFileCount) {
+			    				imageFiles.get(imageFiles.size() - 1).delete();
+			    				tileCountOnDisk--;
+			    			}
+		    				ImageIO.write(tile.getImage(), "jpg", fileName);
+		    				addTile(tile);
+			    		}
 	    			}
-	    		} else {
-	    			int tileCountOnDisk = getTileCountOnDisk();
-	    			if (tileCountOnDisk >= maxFileCount) semaphore.acquire();
-	    			File[] imageFiles = indexedRecordsByAccessTime(fileDirectoryPath);
-	    			while(tileCountOnDisk >= maxFileCount) {
-	    				imageFiles[imageFiles.length - 1].delete();
-	    				tileCountOnDisk--;
-	    			}
-    				ImageIO.write(tile.getImage(), "jpg", new File(fileName));
-    				addTile(tile);
 	    		}
 			} catch (IOException | InterruptedException ex) {
 				ex.printStackTrace();
@@ -370,60 +375,51 @@ public class TileCache implements PropertyChangeListener {
 			}
 		}
 	}
-    
-    private long fileCreationTime(String fileName) {
+
+	public static Duration getAgeOfFile(File file) {
+		return new Duration(getFileCreationTime(file), new DateTime(DateTimeZone.UTC));
+	}
+	
+    public static DateTime getFileCreationTime(File file) {
     	FileTime fileCreationTime = null;
     	try {
-	    	Path filePath = Paths.get(fileName);
+	    	Path filePath = Paths.get(file.toURI());
 			if (Files.exists(filePath)) {
 				BasicFileAttributes attributes = Files.readAttributes(filePath, BasicFileAttributes.class); 			
-				fileCreationTime = attributes.creationTime();	
+				fileCreationTime = attributes.creationTime();
 			}
     	} catch (IOException ex) {
-    		System.err.println("File " + fileName + " Not Found in Cache");
+    		ex.printStackTrace();
     	}
-		return fileCreationTime.toMillis();
+    	return new DateTime(fileCreationTime.toMillis());
     }
-    
-    private File[] indexedRecordsByAccessTime(String fileDirectory) {
-    	File[] files = new File(fileDirectory).listFiles();
-		PairWithLastAccessTime[] pairs = new PairWithLastAccessTime[files.length];
-		for (int i = 0; i < files.length; i++) {
-			pairs[i] = new PairWithLastAccessTime(files[i]);
-		}
-		Arrays.sort(pairs);
-		for (int i = files.length - 1; i >= 0; i--) {
-			files[i] = pairs[i].getFile();
-		}
-		return files;
-    }
-    
-    private class PairWithLastAccessTime implements Comparable<Object> {
-        private long t;
-        private File f;
 
-        private PairWithLastAccessTime(File file) {
-        	f = file;
-            BasicFileAttributes attributes;
-			try {
-				attributes = Files.readAttributes(Paths.get(f.getPath()), BasicFileAttributes.class);
-				t = attributes.lastAccessTime().toMillis();
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-        }
-
-        private File getFile() {
-        	return f;
-        }
-        
+    private class FileAccessTimeCompare implements Comparator<File> {
         @Override
-        public int compareTo(Object o) {
-            long u = ((PairWithLastAccessTime) o).t;
-            return t < u ? -1 : t == u ? 0 : 1;
+        public int compare(File o1, File o2) {
+            return getLastAccessedTime(o2).compareTo(getLastAccessedTime(o1));
         }
     }
     
+    private Long getLastAccessedTime(File file) {
+    	Long lastAccessed = null;
+    	BasicFileAttributes attributes;
+		try {
+			attributes = Files.readAttributes(Paths.get(file.getPath()), BasicFileAttributes.class);
+			lastAccessed = attributes.lastAccessTime().toMillis();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return lastAccessed;
+    }
+    
+    private List<File> byAccessTime(File directory) {
+    	List<File> fileList = new ArrayList<File>();
+    	fileList.addAll(Arrays.asList(directory.listFiles()));
+    	Collections.sort(fileList, new FileAccessTimeCompare());
+    	return fileList;
+    }
+
     private String fileNameEncoder(String key) {
     	String fileName = null;
     	try {
@@ -463,7 +459,7 @@ public class TileCache implements PropertyChangeListener {
 		return maxFileAge;
 	}
 
-	public String getFileDirectoryPath() {
+	public File getFileDirectoryPath() {
 		return fileDirectoryPath;
 	}
     
@@ -474,13 +470,13 @@ public class TileCache implements PropertyChangeListener {
     		public void run() {
     			try {
 					int overage = getTileCountOnDisk() - maxFileCount;
-					File[] imageFiles = null;
+					List<File> imageFiles = null;
 					if (overage > 0) {
 						semaphore.acquire();
-						imageFiles = indexedRecordsByAccessTime(fileDirectoryPath);
+						imageFiles = byAccessTime(fileDirectoryPath);
 					}
 					while (overage > 0) {
-						imageFiles[imageFiles.length-1].delete();
+						imageFiles.get(imageFiles.size()-1).delete();
 						overage--;
 					}
     			} catch (InterruptedException e) {
@@ -497,9 +493,9 @@ public class TileCache implements PropertyChangeListener {
 		return maxFileCount;
 	}
 	
-	private boolean isTileOnDisk(String tileKey, String fileDirectoryPath) {
-		String encodedFileName = fileDirectoryPath + File.separator + fileNameEncoder(tileKey);
-		Path filePath = Paths.get(encodedFileName);
+	private boolean isTileOnDisk(String tileKey, File fileDirectoryPath) {
+		File encodedFileName = new File(fileDirectoryPath + File.separator + fileNameEncoder(tileKey));
+		Path filePath = Paths.get(encodedFileName.toURI());
 		if (Files.exists(filePath)) return true;
 		return false;
 	}
@@ -537,6 +533,5 @@ public class TileCache implements PropertyChangeListener {
 		private TileSource getTileSource() {
 			return tileSource;
 		}
-		
 	}
 }

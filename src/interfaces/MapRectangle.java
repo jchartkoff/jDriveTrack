@@ -1,10 +1,9 @@
-// License: GPL. For details, see Readme.txt file.
 package interfaces;
 
 import java.awt.Graphics;
 import java.awt.Point;
 
-import jdrivetrack.Coordinate;
+import types.Coordinate;
 
 
 /**

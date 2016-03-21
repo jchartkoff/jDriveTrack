@@ -47,7 +47,7 @@ public class ComPort implements SerialInterface {
     private String errorMessage;
     private boolean allowEvents = false;
     private SerialPort serialPort;
-	
+
 	private PropertyChangeSupport pcs = new PropertyChangeSupport(this);
 
 	public ComPort() {}

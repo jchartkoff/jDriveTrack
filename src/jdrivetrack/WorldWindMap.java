@@ -46,6 +46,10 @@ import gov.nasa.worldwind.view.orbit.BasicOrbitView;
 import gov.nasa.worldwindx.examples.ClickAndGoSelectListener;
 import interfaces.JMapViewerEventListener;
 import interfaces.MapInterface;
+import types.GeoTile;
+import types.MapDimension;
+import types.StaticMeasurement;
+import types.TestTile;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -66,6 +70,7 @@ import java.awt.event.MouseWheelEvent;
 import java.awt.event.MouseWheelListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.geom.Point2D.Double;
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
@@ -626,14 +631,12 @@ public class WorldWindMap extends JPanel implements MapInterface, Cloneable {
 			isZooming = false;
 			testGridLayer.setMapDimension(getMapDimension());
 			wwd.redraw();
-			firePropertyChange(ZOOM_COMPLETE, null, altitudeToZoom(view.getZoom()));
 		}
 		if (!wwdRendered) {
 			wwdRendered = true;
 			synchronized(renderingHold) {
 				renderingHold.notifyAll();
 			}
-			firePropertyChange(MAP_RENDERED, null, true);
 		}
 	}
 
@@ -787,9 +790,9 @@ public class WorldWindMap extends JPanel implements MapInterface, Cloneable {
 	}
 
 	@Override
-	public void hideIcon(int index) throws IndexOutOfBoundsException {
+	public void deleteIcon(int index) throws IndexOutOfBoundsException {
 		try {
-			iconList.get(index).setVisible(false);
+			iconList.remove(index);
 			wwd.redraw();
 		} catch (IndexOutOfBoundsException ex) {
 			throw new IndexOutOfBoundsException(ex.getMessage());
@@ -855,7 +858,7 @@ public class WorldWindMap extends JPanel implements MapInterface, Cloneable {
 	}
 
 	@Override
-	public void deleteAllPolygons() {
+	public void deleteAllTestTiles() {
 		polygonLayer.removeAllRenderables();
 		polygonList.subList(0, polygonList.size()).clear();
 		wwd.redraw();
@@ -935,8 +938,8 @@ public class WorldWindMap extends JPanel implements MapInterface, Cloneable {
 	}
 
 	@Override
-	public void setTargetRingDiameter(double targetRingDiameter) {
-		targetRingShape.setRadius(targetRingDiameter);
+	public void setTargetRingRadius(double targetRingRadius) {
+		targetRingShape.setRadius(targetRingRadius);
 		wwd.redraw();
 	}
 
@@ -965,8 +968,8 @@ public class WorldWindMap extends JPanel implements MapInterface, Cloneable {
 	}
 
 	@Override
-	public void setArcIntersectPointDiameter(double diameter) {
-		arcIntersectBma.setMarkerPixels(diameter);
+	public void setArcIntersectPointRadius(double radius) {
+		arcIntersectBma.setMarkerPixels(radius * 2);
 		wwd.redraw();
 	}
 
@@ -1028,9 +1031,9 @@ public class WorldWindMap extends JPanel implements MapInterface, Cloneable {
 	}
 
 	@Override
-	public void setSignalMarkerDiameter(double diameter) {
+	public void setSignalMarkerRadius(double radius) {
 		for (Marker signalMarker : signalMarkers) {
-			signalMarker.getAttributes().setMarkerPixels(diameter);
+			signalMarker.getAttributes().setMarkerPixels(radius * 2);
 		}
 		wwd.redraw();
 	}
@@ -1056,20 +1059,15 @@ public class WorldWindMap extends JPanel implements MapInterface, Cloneable {
 	}
 
 	@Override
-	public boolean isShowPolygons() {
-		return showPolygons;
-	}
-	
-	@Override
-	public void addPolygon(GeoTile geoTile) {
+	public void addTestTile(GeoTile geoTile, Color color, int id) {
 		SurfacePolygon polygon = geoTile;
 		BasicShapeAttributes bsa = new BasicShapeAttributes();
 		bsa.setInteriorOpacity(0.3);
 		bsa.setOutlineOpacity(0.4);
 		bsa.setOutlineWidth(1);
 		bsa.setEnableAntialiasing(true);
-		bsa.setInteriorMaterial(new Material(Color.YELLOW));
-		bsa.setOutlineMaterial(new Material(Color.YELLOW));
+		bsa.setInteriorMaterial(new Material(color));
+		bsa.setOutlineMaterial(new Material(color));
 		polygon.setAttributes(bsa);
 		polygonList.add(polygon);
 		polygonLayer.addRenderable(polygon);
@@ -1077,7 +1075,7 @@ public class WorldWindMap extends JPanel implements MapInterface, Cloneable {
 	}
 	
 	@Override
-	public void changePolygonColor(int index, Color color) throws IndexOutOfBoundsException {
+	public void changeTestTileColor(TestTile testTile, Color color) throws IndexOutOfBoundsException {
 		try {
 			polygonList.get(index).getAttributes().setInteriorMaterial(new Material(color));
 			polygonList.get(index).getAttributes().setOutlineMaterial(new Material(color));
@@ -1088,7 +1086,7 @@ public class WorldWindMap extends JPanel implements MapInterface, Cloneable {
 	}
 
 	@Override
-	public void setPolygonVisible(int index, boolean isVisible) {
+	public void setTestTileVisible(int index, boolean isVisible) {
 		try {
 			polygonList.get(index).setVisible(isVisible);
 			wwd.redraw();
@@ -1098,7 +1096,7 @@ public class WorldWindMap extends JPanel implements MapInterface, Cloneable {
 	}
 	
 	@Override
-	public void deletePolygon(int index) throws IndexOutOfBoundsException {
+	public void deleteTestTile(int index) throws IndexOutOfBoundsException {
 		try {
 			polygonList.remove(index);
 			wwd.redraw();
@@ -1278,7 +1276,7 @@ public class WorldWindMap extends JPanel implements MapInterface, Cloneable {
 	}
 
 	@Override
-	public void setGridSize(final Point.Double gridSize) {
+	public void setTileSize(final Point.Double gridSize) {
 		this.gridSize = gridSize;
 		SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
 			@Override
@@ -1771,31 +1769,13 @@ public class WorldWindMap extends JPanel implements MapInterface, Cloneable {
 	}
 
 	@Override
-	public void setTargetRingRadius(double radius) {
-		// TODO Auto-generated method stub
-		
-	}
-
-	@Override
 	public void setArcCursorRadius(double radius) {
 		// TODO Auto-generated method stub
 		
 	}
 
 	@Override
-	public void setSignalMarkerRadius(double radius) {
-		// TODO Auto-generated method stub
-		
-	}
-
-	@Override
 	public void setArcTraceRadius(double radius) {
-		// TODO Auto-generated method stub
-		
-	}
-
-	@Override
-	public void setArcIntersectPointRadius(double radius) {
 		// TODO Auto-generated method stub
 		
 	}
@@ -1817,4 +1797,149 @@ public class WorldWindMap extends JPanel implements MapInterface, Cloneable {
 		// TODO Auto-generated method stub
 		
 	}
+
+	@Override
+	public void addLine(Double point, double angle, double distance, Color color) {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void showTestTiles(boolean showTestTiles) {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public boolean isShowTestTiles() {
+		// TODO Auto-generated method stub
+		return false;
+	}
+
+	@Override
+	public void adviseMouseOffGlobe() {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void handlePosition(MouseEvent e) {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void setGridReference(Double gridReference) {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void setGridSize(Double gridFieldDimension) {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void clearCache() {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void setDisplayToFitMapElements(boolean gpsMarker, boolean signalMarkers, boolean testTiles, boolean rings) {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void addArc(StaticMeasurement sma, StaticMeasurement smb, int unit) {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public int getCurrentSignalMarkerIndex() {
+		// TODO Auto-generated method stub
+		return 0;
+	}
+
+	@Override
+	public int getCurrentIconIndex() {
+		// TODO Auto-generated method stub
+		return 0;
+	}
+
+	@Override
+	public int getCurrentQuadIndex() {
+		// TODO Auto-generated method stub
+		return 0;
+	}
+
+	@Override
+	public int getCurrentRingIndex() {
+		// TODO Auto-generated method stub
+		return 0;
+	}
+
+	@Override
+	public int getCurrentLineIndex() {
+		// TODO Auto-generated method stub
+		return 0;
+	}
+
+	@Override
+	public void deleteLine(int index) {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void deleteCurrentLine() {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void deleteCurrentQuad() {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void deleteRing(int index) {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void deleteCurrentRing() {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void deleteCurrentIcon() {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void deleteArc(int index) {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void deleteCurrentArc() {
+		// TODO Auto-generated method stub
+		
+	}
+
+	@Override
+	public void deleteTestTile(TestTile testTile) {
+		// TODO Auto-generated method stub
+		
+	}
+
 }

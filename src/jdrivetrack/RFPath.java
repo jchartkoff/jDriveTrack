@@ -2,6 +2,7 @@ package jdrivetrack;
 
 import gov.nasa.worldwind.geom.LatLon;
 import jsc.util.Logarithm;
+import types.StaticMeasurement;
 
 public class RFPath {
 	
@@ -11,17 +12,17 @@ public class RFPath {
     }
 
     public static double conicAngleToTarget(StaticMeasurement sma, StaticMeasurement smb) {
-    	double aha = distanceInMetersFreeSpacePathLoss(sma.dBm, sma.frequencyMHz);
-    	double ahb = distanceInMetersFreeSpacePathLoss(smb.dBm, smb.frequencyMHz);
+    	double aha = distanceInMetersFreeSpacePathLoss(sma.getdBm(), sma.getFrequencyMHz());
+    	double ahb = distanceInMetersFreeSpacePathLoss(smb.getdBm(), smb.getFrequencyMHz());
     	
-    	double axa = Math.sqrt((aha*aha) - (sma.altitude*sma.altitude));
-    	double dtd = Vincenty.distanceToDirect(sma.point, sma.altitude, smb.point, smb.altitude);
-    	double cmg = LatLon.rhumbAzimuth(LatLon.fromDegrees(sma.point.y, sma.point.x), 
-    			LatLon.fromDegrees(smb.point.y, smb.point.x)).getDegrees();
-    	double dttr = Vincenty.degreesToMeters(dtd, cmg, sma.point.y);
+    	double axa = Math.sqrt((aha*aha) - (sma.getAltitude() * sma.getAltitude()));
+    	double dtd = Vincenty.distanceToDirect(sma.getPoint(), sma.getAltitude(), smb.getPoint(), smb.getAltitude());
+    	double cmg = LatLon.rhumbAzimuth(LatLon.fromDegrees(sma.getPoint().y, sma.getPoint().x), 
+    			LatLon.fromDegrees(smb.getPoint().y, smb.getPoint().x)).getDegrees();
+    	double dttr = Vincenty.degreesToMeters(dtd, cmg, sma.getPoint().y);
     	
     	double mxb = axa + dttr;
-    	double mhb = Math.sqrt((mxb*mxb) + (smb.altitude*smb.altitude));
+    	double mhb = Math.sqrt((mxb*mxb) + (smb.getAltitude() * smb.getAltitude()));
     	double adhbha = ahb - aha;
     	double mdhbha = mhb - aha;
 

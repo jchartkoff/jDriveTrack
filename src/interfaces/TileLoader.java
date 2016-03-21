@@ -1,6 +1,6 @@
 package interfaces;
 
-import jdrivetrack.Tile;
+import types.Tile;
 
 public interface TileLoader {
 

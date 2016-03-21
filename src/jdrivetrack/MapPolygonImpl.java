@@ -1,4 +1,3 @@
-// License: GPL. For details, see Readme.txt file.
 package jdrivetrack;
 
 import java.awt.AlphaComposite;
@@ -16,6 +15,8 @@ import java.util.List;
 
 import interfaces.ICoordinate;
 import interfaces.MapPolygon;
+import types.Layer;
+import types.Style;
 
 public class MapPolygonImpl extends MapObjectImpl implements MapPolygon {
 
@@ -48,9 +49,14 @@ public class MapPolygonImpl extends MapObjectImpl implements MapPolygon {
     public MapPolygonImpl(Layer layer, String name, ICoordinate ... points) {
         this(layer, name, Arrays.asList(points), getDefaultStyle());
     }
-
+    
     public MapPolygonImpl(Layer layer, String name, List<? extends ICoordinate> points, Style style) {
         super(layer, name, style);
+        this.points = points;
+    }
+    
+    public MapPolygonImpl(Layer layer, String name, List<? extends ICoordinate> points, Style style, int id) {
+        super(layer, name, style, id);
         this.points = points;
     }
 

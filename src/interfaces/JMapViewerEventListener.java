@@ -1,4 +1,3 @@
-// License: GPL. For details, see Readme.txt file.
 package interfaces;
 
 import java.util.EventListener;

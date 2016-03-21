@@ -4,6 +4,7 @@ import jssc.SerialPort;
 import jssc.SerialPortEvent;
 import jssc.SerialPortEventListener;
 import jssc.SerialPortException;
+import types.EmissionDesignator;
 
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
@@ -11,7 +12,6 @@ import javax.swing.Timer;
 
 import jdrivetrack.Calibrate;
 import jdrivetrack.CalibrationDataObject;
-import jdrivetrack.EmissionDesignator;
 import jdrivetrack.Utility;
 import interfaces.RadioInterface;
 

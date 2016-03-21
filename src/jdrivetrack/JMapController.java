@@ -1,6 +1,6 @@
-// License: GPL. For details, see Readme.txt file.
 package jdrivetrack;
 
+import java.awt.event.KeyListener;
 import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionListener;
 import java.awt.event.MouseWheelListener;
@@ -13,6 +13,7 @@ import java.awt.event.MouseWheelListener;
  * <li>{@link MouseListener}</li>
  * <li>{@link MouseMotionListener}</li>
  * <li>{@link MouseWheelListener}</li>
+ *  <li>{@link KeyListener}</li>
  * </ul>
  *
  * @author Jan Peter Stotz
@@ -29,6 +30,8 @@ public abstract class JMapController {
             map.addMouseWheelListener((MouseWheelListener) this);
         if (this instanceof MouseMotionListener)
             map.addMouseMotionListener((MouseMotionListener) this);
+        if (this instanceof KeyListener)
+        	map.addKeyListener((KeyListener) this);
     }
 
 }

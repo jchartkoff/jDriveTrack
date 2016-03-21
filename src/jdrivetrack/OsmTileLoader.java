@@ -14,6 +14,7 @@ import java.util.concurrent.Executors;
 import interfaces.TileJob;
 import interfaces.TileLoader;
 import interfaces.TileLoaderListener;
+import types.Tile;
 
 public class OsmTileLoader implements TileLoader {
     private static final Executor jobDispatcher = Executors.newSingleThreadExecutor();
@@ -32,9 +33,9 @@ public class OsmTileLoader implements TileLoader {
             synchronized (tile) {
                 if ((tile.isLoaded() && !tile.hasError()) || tile.isLoading())
                     return;
-                tile.loaded = false;
-                tile.error = false;
-                tile.loading = true;
+                tile.setLoaded(false);
+                tile.setError(false);
+                tile.setLoading(true);
             }
             try {
                 URLConnection conn = loadTileFromOsm(tile);
@@ -67,7 +68,7 @@ public class OsmTileLoader implements TileLoader {
                     }
                 }
             } finally {
-                tile.loading = false;
+                tile.setLoading(false);
                 tile.setLoaded(true);
             }
         }
@@ -148,7 +149,7 @@ public class OsmTileLoader implements TileLoader {
             } catch (NumberFormatException e) {
                 // ignore malformed Cache-Control headers
                 System.err.println(e.getMessage());
-            }
+            } 
         }
         if (!lng.equals(0L)) {
             tile.putValue("expires", lng.toString());

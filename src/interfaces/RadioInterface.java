@@ -1,43 +1,46 @@
 package interfaces;
 
 import java.beans.PropertyChangeListener;
+import java.util.List;
 
-import jdrivetrack.CalibrationDataObject;
-import jdrivetrack.EmissionDesignator;
+import types.CalibrationDataObject;
+import types.EmissionDesignator;
 
 public interface RadioInterface {
 
-	public static final String SIGNAL_OFFSET = "SIGNAL_OFFSET";
-	public static final String DTMF_DECODE = "DTMF_DECODE";
-	public static final String WAVEFORM_DATA = "WAVEFORM_DATA";
-	public static final String SCAN_STATUS = "SCAN_STATUS";
-	public static final String DSP_STATUS = "DSP_STATUS";
-	public static final String BREAK = "BREAK";
-	public static final String READY = "READY";
-	public static final String FIRMWARE = "FIRMWARE";
-	public static final String COUNTRY = "COUNTRY";
-	public static final String DSP = "DSP";
-	public static final String POWER = "POWER";
-	public static final String PROTOCOL = "PROTOCOL";
-	public static final String ERROR_MESSAGE = "ERROR_MESSAGE";
-	public static final String ERROR = "ERROR";
-	public static final String RSSI = "RSSI";
-	public static final String BUSY = "BUSY";
-	public static final String BER = "BER";
-	public static final String ACK = "ACK";
-	public static final String TX_DATA = "TX_DATA";
-	public static final String RX_DATA = "RX_DATA";
-	public static final String SEND_TO_SERIAL_PORT = "SEND_TO_SERIAL_PORT";
-	public static final String CLOSE_SERIAL_PORT = "CLOSE_SERIAL_PORT"; 
-	public static final String SET_BAUD_RATE = "SET_BAUD_RATE";
-	public static final String CANCEL_EVENTS = "CANCEL_EVENTS";
+	public static final String SIGNAL_OFFSET = "SIGNAL_OFFSET"; 
+	public static final String DTMF_DECODE = "DTMF_DECODE"; 
+	public static final String WAVEFORM_DATA = "WAVEFORM_DATA"; 
+	public static final String SCAN_STATUS = "SCAN_STATUS"; 
+	public static final String DSP_STATUS = "DSP_STATUS"; 
+	public static final String BREAK = "BREAK"; 
+	public static final String READY = "READY"; 
+	public static final String FIRMWARE = "FIRMWARE"; 
+	public static final String COUNTRY = "COUNTRY"; 
+	public static final String DSP = "DSP"; 
+	public static final String POWER = "POWER"; 
+	public static final String PROTOCOL = "PROTOCOL"; 
+	public static final String ERROR_MESSAGE = "ERROR_MESSAGE"; 
+	public static final String ERROR = "ERROR"; 
+	public static final String RSSI = "RSSI"; 
+	public static final String BUSY = "BUSY"; 
+	public static final String BER = "BER"; 
+	public static final String ACK = "ACK"; 
+	public static final String TX_DATA = "TX_DATA"; 
+	public static final String RX_DATA = "RX_DATA"; 
+	public static final String SEND_TO_SERIAL_PORT = "SEND_TO_SERIAL_PORT"; 
+	public static final String CLOSE_SERIAL_PORT = "CLOSE_SERIAL_PORT";  
+	public static final String SET_BAUD_RATE = "SET_BAUD_RATE"; 
+	public static final String CANCEL_EVENTS = "CANCEL_EVENTS"; 
+	public static final String SCAN_CHANNEL_READY = "SCAN_CHANNEL_READY"; 
+	public static final String RADIO_THREADS_TERMINATED = "RADIO_THREADS_TERMINATED"; 
 	
 	public static final String[] DEVICES = {
-		"Harris P7200",
-		"Harris XG75", 
-		"Icom PCR1000", 
-		"Icom PCR2500", 
-		"Yaesu FT100"
+		"Harris P7200", 
+		"Harris XG75",  
+		"Icom PCR1000",  
+		"Icom PCR2500",  
+		"Yaesu FT100" 
 	};
 	
 	boolean isReady();
@@ -88,13 +91,13 @@ public interface RadioInterface {
 
 	String getFirmware();
 
-	int getRSSI();
+	int getRSSI(int index);
 
 	boolean isBusy();
 
 	void setFrequency(double frequency);
 
-	double getFrequency();
+	double getFrequency(int index);
 
 	void setToneSquelch(double toneSquelch);
 
@@ -103,30 +106,22 @@ public interface RadioInterface {
 	void setDigitalSquelch(int digitalSquelch);
 
 	int getDigitalSquelch();
-
-	double getdBm();
-
-	double getPercent();
 	
-	void setScanList(Double[] newScanList);
+	void setScanList(Double[] scan);
 
 	void setScanSelectList(Boolean[] scanSelect);
 
 	void setVfoMode(boolean vfoMode);
 
-	Double[] getScanList();
+	List<Double> getScanList();
 
-	Boolean[] getScanSelectList();
+	List<Boolean> getScanSelectList();
 
 	boolean isVfoMode();
 
 	String getTransmittedData();
 	
 	String getReceivedData();
-
-	Integer[] getdBmList();
-
-	int[] getPercentList();
 	
 	int getCurrentChannel();
 	
@@ -136,14 +131,6 @@ public interface RadioInterface {
 
 	String getSerialNumber();
 
-	double getBER();
-
-	void sampleRSSIValues(boolean sampleRSSI);
-
-	void sampleBERValues(boolean sampleBER);
-
-	Double[] getBERList();
-
 	boolean isProgScan();
 
 	void setProgScan(boolean scan);
@@ -151,8 +138,6 @@ public interface RadioInterface {
 	boolean isSquelchDelay();
 
 	void setSquelchDelayLong(boolean squelchDelay);
-	
-	double getTestdBmValue();
 	
 	void addPropertyChangeListener(PropertyChangeListener listener);
 	
@@ -209,4 +194,46 @@ public interface RadioInterface {
 	String[] getAvailableBaudRates();
 
 	boolean serialParametersFixed();
+
+	boolean isSinadEnabled();
+	
+	double getSinad(int index);
+	
+	double getdBm(int index);
+	
+	Double getBer(int index);
+	
+	boolean supportsSinad();
+
+	boolean suportsBer();
+
+	boolean supportsRssi();
+
+	List<Double> getSinadList();
+
+	List<Double> getBerList();
+
+	List<Double> getdBmList();
+
+	void sampleRssiValues(boolean sample);
+	
+	void sampleBerValues(boolean sample);
+
+	void setScanSelectList(List<Boolean> scanSelectList);
+
+	void setScanList(List<Double> scanList);
+
+	Double getScanList(int index);
+
+	Boolean getScanSelectList(int index);
+
+	List<Integer> getPercentList();
+
+	Integer[] getPercentArray();
+
+	void startSinad();
+
+	void stopSinad();
+
+	void setSinadEnabled(boolean sinadEnabled);
 }

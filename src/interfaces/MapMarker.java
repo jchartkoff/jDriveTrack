@@ -3,9 +3,9 @@ package interfaces;
 import java.awt.Graphics;
 import java.awt.Point;
 
-import jdrivetrack.Coordinate;
+import types.Coordinate;
 
-public interface MapMarker extends MapObject, ICoordinate{
+public interface MapMarker extends MapObject, ICoordinate {
 
     enum STYLE {
         FIXED,

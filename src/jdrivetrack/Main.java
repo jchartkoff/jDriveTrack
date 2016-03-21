@@ -9,6 +9,7 @@ import interfaces.GPSInterface.FixQuality;
 import interfaces.MapInterface;
 import interfaces.RadioInterface;
 import interfaces.SerialInterface;
+import jdrivetrack.CoordinateUtils.Precision;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -16,6 +17,7 @@ import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Event;
+import java.awt.EventQueue;
 import java.awt.Font;
 import java.awt.Frame;
 import java.awt.Point;
@@ -30,15 +32,18 @@ import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
+
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.text.DecimalFormat;
-import java.text.NumberFormat;
 import java.text.SimpleDateFormat;
+
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Iterator;
@@ -82,8 +87,17 @@ import javax.swing.WindowConstants;
 import javax.swing.border.EtchedBorder;
 import javax.swing.border.TitledBorder;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.filechooser.FileView;
 
 import jssc.SerialPortException;
+import types.AprsIcon;
+import types.Bearing;
+import types.TestSettings;
+import types.GeoTile;
+import types.Measurement;
+import types.MeasurementSet;
+import types.StaticMeasurement;
+import types.TestTile;
 
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.CommandLine;
@@ -93,10 +107,9 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 
 import interfaces.JMapViewerEventListener;
-
 import events.JMVCommandEvent;
 
-public class Main extends JFrame implements JMapViewerEventListener {
+public class Main extends JFrame {
 	private static final long serialVersionUID = 7230746210127860L;
 	
 	public static final Logger log = Logger.getLogger(Main.class.getName());
@@ -109,40 +122,41 @@ public class Main extends JFrame implements JMapViewerEventListener {
     private static final double DEFAULT_STARTUP_SCALE = 1.0;
     private static final Dimension BUTTON_DIM = new Dimension(60,28);
     
-    private static final String DEFAULT_TILE_COMPLETE_SOUND = System.getProperty("user.home") + 
-    	File.separator + "drivetrack" + File.separator + "sounds" + File.separator + "Ding.wav";
-    
-    private static final String DEFAULT_DATA_FILE_PATH = System.getProperty("user.home") + 
-        File.separator + "drivetrack" + File.separator + "data_files";
-    
-    private static final String DEFAULT_IMAGE_FILE_PATH = System.getProperty("user.home") + 
-    	File.separator + "drivetrack" + File.separator + "images" + File.separator;
-    
+    private static final String DEFAULT_TILE_COMPLETE_SOUND = System.getProperty("user.home") +  
+    	File.separator + "drivetrack" + File.separator + "sounds" + File.separator + "Ding.wav";  
+
+    private static final String DEFAULT_DATA_FILE_DIRECTORY = System.getProperty("user.home") +  
+        File.separator + "drivetrack" + File.separator + "data"; 
+
+    private static final String USERNAME = "john";
+    private static final String PASSWORD = "password";
     
     private static final boolean MONITOR_RADIO_HANDSHAKING = false;
     private static final boolean MONITOR_GPS_HANDSHAKING = false;
     
     private static final long WINDOW_CLOSING_COMPLETE = 1;
     private static final long STARTUP_COMPLETE = 2;
-    private static final long NETWORK_CLOCK_CLOSED = 4;
-    private static final long TIME_UPDATES_CLOSED = 8;
+    private static final long NETWORK_CLOCK_STOPPED = 4;
+    private static final long TIME_UPDATES_STOPPED = 8;
     private static final long NETWORK_INTERFACE_CHECK_COMPLETE = 16;
     private static final long APRS_INTERFACE_CLOSED = 32;
     private static final long RADIO_INTERFACE_CLOSED = 64;
     private static final long GPS_INTERFACE_CLOSED = 128;
-    private static final long LOG_REPLAY_COMPLETE = 256;
-    private static final long SQL_DATABASE_CLOSED = 512;
-    private static final long ALL_THREADS_RELEASED = 1023;
+    private static final long DATABASE_CLOSED = 256;
+    private static final long ALL_THREADS_RELEASED = 511;
     
-    private enum DataMode {OPEN, CLOSED, STOP, REPLAY, RECORD, PAUSE, REPLAY_COMPLETE}
-    private enum PositionSource {MANUAL, GPS, ARCHIVE}
-    private enum TestMode {RSSI, RSSI_SINAD, SINAD, BER, RSSI_BER, MODE_NOT_SELECTED}
+    private static final Color tileSelectedColor = new Color(64, 64, 64, 32);
+	private static final Color tileInProgressColor = new Color(64, 64, 0, 32);
+	private static final Color tileCompleteColor = new Color(0, 64, 0, 32);
+	
+    private enum DataMode {OPEN, CLOSED, STOP, RECORD, RESTORE_COMPLETE}
+    private enum PositionSource {MANUAL, GPS, ARCHIVE, TIMER, LEARN}
+    private enum TestMode {RSSI, RSSI_SINAD, SINAD, BER, RSSI_BER, MODE_NOT_SELECTED, DOPPLER, STATIC, OFF}
     
     private boolean monitorRadioHandshaking = MONITOR_RADIO_HANDSHAKING;
     private boolean monitorGPSHandshaking = MONITOR_GPS_HANDSHAKING;
     private volatile boolean serialErrorQueued = false;
-    private long shutdownMask = LOG_REPLAY_COMPLETE + SQL_DATABASE_CLOSED;
-    private volatile boolean isVMShuttingDown = false;
+    private long shutdownMask;
     private volatile boolean readyToExit = false;
     private Triangulate triangulate = null;
     private NetworkTime networkTime = null;
@@ -155,6 +169,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
     private SerialGPSComponent serialGPSComponent;
     private RadioComponent radioComponent;
     private CoverageTestSettings coverageTestSettings;
+    private DatabaseConfiguration databaseConfig;
     private AprsComponent aprsComponent;
     private SignalAnalysis signalAnalysis;
     private JToolBar toolBar;
@@ -162,7 +177,6 @@ public class Main extends JFrame implements JMapViewerEventListener {
     private CompassRose gpsCompassRose;
     private JPanel mapPanel;
     private JLabel recordCountLabel;
-    private JLabel recordPointerLabel;
     private JLabel logFileNameLabel;
     private JLabel cursorLatitude;
     private JLabel cursorLongitude;
@@ -203,24 +217,15 @@ public class Main extends JFrame implements JMapViewerEventListener {
     private JLabel cursorTestTileReference;
     private JLabel currentGridSquare;
     private JLabel measurementPeriod;
-    private JLabel measurementsThisGrid;
-    private JLabel radioTxDataWord;
-    private JLabel radioRxDataWord;
-    private JLabel tileCount;
+    private JLabel measurementsThisTile;
+    private JLabel maxMeasurementsPerTile;
+    private JLabel minMeasurementsPerTile;
+    private JLabel tilesCompleted;
+    private JLabel totalTiles;
     private JLabel averageRssiInCurrentTile;
     private JLabel averageBerInCurrentTile;
     private JLabel averageSinadInCurrentTile;
     private JPanel gpsInfoPanel;
-    private NumberFormat recordFormat;
-    private NumberFormat latFormat;
-    private NumberFormat lonFormat;
-    private NumberFormat speedFormat;
-    private NumberFormat dBmFormat;
-    private NumberFormat berFormat;
-    private NumberFormat markerFormat;
-    private NumberFormat measurementPeriodFormat;
-    private NumberFormat measurementsTakenFormat;
-    private NumberFormat sinadFormat;
     private Timer periodTimer;
     private Timer gpsRxDataTimer;
     private Timer gpsTxDataTimer;
@@ -232,21 +237,18 @@ public class Main extends JFrame implements JMapViewerEventListener {
     private Timer measurementTimer;
     private Timer zoomOutMouseDownTimer;
     private Timer zoomInMouseDownTimer;
-    private JButton newDataFileButton;
+    private JToggleButton newDataFileButton;
     private JToggleButton openDataFileButton;
     private JToggleButton closeDataFileButton;
     private JButton saveDataFileButton;
     private JToggleButton stopDataFileButton;
-    private JToggleButton replayDataFileButton;
     private JToggleButton recordDataFileButton;
-    private JButton bofDataFileButton;
-    private JButton eofDataFileButton;
     private JToggleButton gpsButton;
     private JButton centerOnGpsButton;
     private JToggleButton radioButton;
     private JToggleButton sinadButton;
     private JToggleButton aprsButton;
-    private JToggleButton arcButton;
+    private JToggleButton learnModeButton;
     private JToggleButton coverageTestButton;
     private JToggleButton staticLocationAnalysisButton;
     private JButton zoomInButton;
@@ -270,6 +272,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
     private JMenuItem exitMenuItem;
     private JMenuItem staticSignalLocationSettingsMenuItem;
     private JMenuItem signalAnalysisMenuItem;
+    private JMenuItem databaseConfigMenuItem;
     private JMenuItem aboutMenuItem;
     private JMenu fileMenu;
     private JMenu gpsMenu;
@@ -279,47 +282,31 @@ public class Main extends JFrame implements JMapViewerEventListener {
     private JMenu aprsMenu;
     private JMenu staticSignalLocationMenu;
     private JMenu signalAnalysisMenu;
+    private JMenu databaseConfigMenu;
     private JMenu helpMenu;
     private DataMode dataMode;
-    private int recordPointer;
     private int recordCount;
-    private String dataFileName;
-    private String lastDataFileDirectory;
-    private int tilesTraversed;
-    private int dotsPerTile;
-    private Point.Double currentLonLat = null;
-    private UTMTestTile utmTestTile = null;
-    private Point.Double tileDimensionInMeters = null;
-    private Point.Double tileSizeArcSeconds = null;
-    private Point.Double testTileLonLat = null;
-    private int indexPointer = -1;
-    private int totalGridsCompleted = 0;
+    private File dataDirectory;
     private MapInterface map;
+    private DerbyRelationalDatabase database;
     private Point.Double startupLonLat = null;
     private double startupScale;
     private int startupZoom;
-    private boolean showSignalMarkers = true;
+    private boolean coverageTestActive = false;
+    private boolean staticTestActive = false;
     private Sinad sinad;
     private Integer[] sinadArray = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-    private DataBase dataBase;
-    private DriveTestData driveTestData;
     private int markerCounter = 0;
-    private List<AprsIcon> iconList = new ArrayList<AprsIcon>(64);
-    private List<TileIndex> tileIndex = new ArrayList<TileIndex>(64);
-    private List<Bearing> bearingList = new ArrayList<Bearing>(64);
-    private List<ConicSection> conicSectionList = new ArrayList<ConicSection>(64);
-    private List<StaticMeasurement> staticList = new ArrayList<StaticMeasurement>(64);
+    private List<AprsIcon> iconList = new ArrayList<AprsIcon>(1024);
+    private List<Bearing> bearingList = new ArrayList<Bearing>(1024);
+    private List<ConicSection> conicSectionList = new ArrayList<ConicSection>(1024);
     private List<Integer> staticListStartSize = new ArrayList<Integer>();
     private Point.Double lastDotLocation = new Point.Double();
 	private List<Point.Double> intersectList = new ArrayList<Point.Double>();
 	private IntersectList intersectListUpdate = null;
-    private int logFileRSSI;
-    private int logFileSINAD;
-    private double logFileBER;
     private PositionSource lastInputSource;
     private boolean periodTimerTimeOut = false;
     private boolean periodTimerHalt = false;
-    private boolean isRecord = false;
     private FileHandler fh;
     private double cursorBearing = 0;
     private Point.Double cursorBearingPosition = null;
@@ -328,15 +315,9 @@ public class Main extends JFrame implements JMapViewerEventListener {
     private int startMapArg = -1;
     private int startRadioArg = -1;
     private int startGpsArg = -1;
-    private boolean doStartTestMode = false;
-    private boolean doStartClearAllPrefs = false;
-    private String averageRssiInCurrentTileText;
-    private String averageBerInCurrentTileText;
-    private String averageSinadInCurrentTileText;
-    private boolean isCoverageTestModeActive = false;
-    private boolean isStaticModeActive = false;
-    private boolean doProcessStaticMeasurements = false;
-    private ProgressMonitor logReplayProgressMonitor;
+    private boolean startInDemoMode = false;
+    private boolean clearAllPrefs = false;
+    private boolean processStaticMeasurements = false;
     private PropertyChangeListener databaseListener;
     private PropertyChangeListener radioComponentListener;
     private PropertyChangeListener radioSerialInterfaceListener;
@@ -349,37 +330,50 @@ public class Main extends JFrame implements JMapViewerEventListener {
     private MouseMotionListener mapMouseMotionListener;
     private MouseListener mapMouseListener;
     private KeyListener mapKeyListener;
+    private JMapViewerEventListener jmvEventListener;
     private long previousGpsTimeInMillis = 0;
     private boolean mouseOffGlobe = true;
     private boolean mapDragged = false;
     private TestMode testMode;
     private int measurementDelay;
-    private ProgressMonitor newDataFileProgress;
+    private ProgressMonitor fileOpenMonitor;
+    private ProgressMonitor shutdownMonitor;
+    private ProgressMonitor coverageTestRestoreMonitor;
+    private ProgressMonitor staticTestRestoreMonitor;
+    private ProgressMonitor newFileMonitor;
+    private boolean learnMode = false;
+    private TestSettings testSettings;
+    private TestTile currentTestTile;
+    private boolean learnModeHold = false;
+    private String averageRssiInCurrentTileText;
+    private String averageBerInCurrentTileText;
+    private String averageSinadInCurrentTileText;
+    private String logFileName;
     
     public Main(String args[]) {
     	registerShutdownHook();
     	
 		try {
 			Options options = new Options();
-	    	options.addOption(new Option("m", true, "map style"));
-	    	options.addOption(new Option("r", true, "radio"));
-	    	options.addOption(new Option("g", true, "gps"));
-	    	options.addOption(new Option("d", "demonstration mode"));
-	    	options.addOption(new Option("c", "clear all preferences"));
+	    	options.addOption(new Option("m", true, "map style")); 
+	    	options.addOption(new Option("r", true, "radio")); 
+	    	options.addOption(new Option("g", true, "gps")); 
+	    	options.addOption(new Option("d", "demonstration mode")); 
+	    	options.addOption(new Option("c", "clear all preferences")); 
 	    	CommandLineParser parser = new DefaultParser(); 
 			CommandLine cmd = parser.parse(options, args);
-			if (cmd.hasOption("r")) startRadioArg = Integer.parseInt(cmd.getOptionValue("r"));
-			if (cmd.hasOption("m")) startMapArg = Integer.parseInt(cmd.getOptionValue("m"));
-			if (cmd.hasOption("g")) startGpsArg = Integer.parseInt(cmd.getOptionValue("g"));
-			if (cmd.hasOption("d")) doStartTestMode = true;
-			if (cmd.hasOption("c")) doStartClearAllPrefs = true;
+			if (cmd.hasOption("r")) startRadioArg = Integer.parseInt(cmd.getOptionValue("r")); 
+			if (cmd.hasOption("m")) startMapArg = Integer.parseInt(cmd.getOptionValue("m")); 
+			if (cmd.hasOption("g")) startGpsArg = Integer.parseInt(cmd.getOptionValue("g")); 
+			if (cmd.hasOption("d")) startInDemoMode = true; 
+			if (cmd.hasOption("c")) clearAllPrefs = true; 
 		} catch (ParseException ex) {
 			reportException(ex);
 		}
 
         try {
-        	String eventLogFileName = System.getProperty("user.home") + File.separator +"drivetrack" 
-        		+ File.separator + "eventLog" + File.separator + "event.log";
+        	String eventLogFileName = System.getProperty("user.home") + File.separator +"drivetrack"  
+        		+ File.separator + "eventLog" + File.separator + "event.log"; 
         	Path path = Paths.get(eventLogFileName);
     		File directory = new File(path.getParent().toString());
     		if (!directory.exists()) new File(path.getParent().toString()).mkdirs();
@@ -399,17 +393,18 @@ public class Main extends JFrame implements JMapViewerEventListener {
         setAlwaysOnTop(false);
 
         getSettingsFromRegistry();
+        createDirectories();
         initializeLookAndFeel();
         initializeComponents();
-        if (doStartClearAllPrefs) clearAllPreferences();
+        if (clearAllPrefs) clearAllPreferences();
         configureComponents();
         initializeComponentListeners();
         initializeListeners();
         createGraphicalUserInterface();
         displayGraphicalUserInterface();
         monitorHandshaking();
-
-		if (doStartTestMode) startTest();
+        
+		if (startInDemoMode) startDemo();
 
 		signalReadyToExit(STARTUP_COMPLETE);
 		
@@ -418,23 +413,27 @@ public class Main extends JFrame implements JMapViewerEventListener {
     }
 
 	public static void main(final String[] args) {
-		SwingUtilities.invokeLater(new Runnable() {
+		invokeLaterInDispatchThreadIfNeeded(new Runnable() {
 		    @Override
 		    public void run() {
 		        new Main(args);
 		    }
 		});
 	}
-
+	
+	private void createDirectories() {
+    	if (!dataDirectory.exists()) dataDirectory.mkdirs();
+	}
+	
     private void getSettingsFromRegistry() {
-    	systemPref = Preferences.systemRoot().node("jdrivetrack/prefs/Main");
-    	lastDataFileDirectory = systemPref.get("LastDataFileDirectory", DEFAULT_DATA_FILE_PATH);
-        startupLonLat = new Point.Double(systemPref.getDouble("MapLongitude", DEFAULT_STARTUP_COORDINATES.x),
-        	systemPref.getDouble("MapLatitude", DEFAULT_STARTUP_COORDINATES.y));
+    	systemPref = Preferences.userRoot().node("jdrivetrack/prefs/Main"); 
+    	dataDirectory = new File(systemPref.get("LastDataFileDirectory", DEFAULT_DATA_FILE_DIRECTORY)); 
+        startupLonLat = new Point.Double(systemPref.getDouble("MapLongitude", DEFAULT_STARTUP_COORDINATES.x), 
+        	systemPref.getDouble("MapLatitude", DEFAULT_STARTUP_COORDINATES.y)); 
         if (startupLonLat.y < -90 || startupLonLat.y > 90 || startupLonLat.x < -180 || startupLonLat.x > 180) 
         	startupLonLat = DEFAULT_STARTUP_COORDINATES;
-        startupScale = systemPref.getDouble("MapScale", DEFAULT_STARTUP_SCALE); 
-        startupZoom = systemPref.getInt("MapZoom", DEFAULT_STARTUP_ZOOM); 
+        startupScale = systemPref.getDouble("MapScale", DEFAULT_STARTUP_SCALE);  
+        startupZoom = systemPref.getInt("MapZoom", DEFAULT_STARTUP_ZOOM);  
     }
     
     private void monitorHandshaking() {
@@ -451,49 +450,52 @@ public class Main extends JFrame implements JMapViewerEventListener {
     }
 
     private void initializeComponents() {
+		coverageTestRestoreMonitor = new ProgressMonitor(this, "Restoring Coverage Test", "", 0, 100); 
+		staticTestRestoreMonitor = new ProgressMonitor(this, "Restoring Static Signal Location Test", "", 0, 100); 
+		shutdownMonitor = new ProgressMonitor(this, "", "Closing Application", 0, 19); 
+		fileOpenMonitor = new ProgressMonitor(this, "Downloading Data from Disk", "", 0, 100); 
+		newFileMonitor = new ProgressMonitor(this, "Building New SQL Database", "", 0, 100); 
+		
+    	shutdownMask += DATABASE_CLOSED;
     	recordCount = 0;
-        recordPointer = 0;
-
         networkTime = new NetworkTime();
-        
+        nicCheck = new NetworkInterfaceCheck();
         mapPanel = new JPanel();
-
         toolBar = new JToolBar();
-
+        testSettings = new TestSettings();
+        
         openDataFileButton = new JToggleButton();
         closeDataFileButton = new JToggleButton();
         stopDataFileButton = new JToggleButton();
-        replayDataFileButton = new JToggleButton();
         recordDataFileButton = new JToggleButton(); 
         gpsButton = new JToggleButton();
         radioButton = new JToggleButton();
         sinadButton = new JToggleButton();
         aprsButton = new JToggleButton();
-        arcButton = new JToggleButton();
+        learnModeButton = new JToggleButton();
         coverageTestButton = new JToggleButton();
         staticLocationAnalysisButton = new JToggleButton();
+        newDataFileButton = new JToggleButton();
         
         centerOnGpsButton = new JButton();
         zoomInButton = new JButton();
         zoomOutButton = new JButton();
-        bofDataFileButton = new JButton();
-        eofDataFileButton = new JButton();
         saveDataFileButton = new JButton();
-        newDataFileButton = new JButton();
-
+        
         JMenuBar menuBar = new JMenuBar();
 
         setJMenuBar(menuBar);
 
-        fileMenu = new JMenu(" File ");
-        gpsMenu = new JMenu(" GPS ");
-        receiverMenu = new JMenu(" Receiver ");
-        systemMenu = new JMenu(" Coverage Test ");
-        mapMenu = new JMenu(" Map ");
-        aprsMenu = new JMenu(" APRS ");
-        staticSignalLocationMenu = new JMenu(" Static Signal Location ");
-        signalAnalysisMenu = new JMenu(" Signal Analysis ");
-        helpMenu = new JMenu(" Help ");
+        fileMenu = new JMenu(" File "); 
+        gpsMenu = new JMenu(" GPS "); 
+        receiverMenu = new JMenu(" Receiver "); 
+        systemMenu = new JMenu(" Coverage Test "); 
+        mapMenu = new JMenu(" Map "); 
+        aprsMenu = new JMenu(" APRS "); 
+        staticSignalLocationMenu = new JMenu(" Static Signal Location "); 
+        signalAnalysisMenu = new JMenu(" Signal Analysis "); 
+        databaseConfigMenu = new JMenu(" Database ");
+        helpMenu = new JMenu(" Help "); 
 
         menuBar.add(fileMenu);
         menuBar.add(gpsMenu);
@@ -503,28 +505,30 @@ public class Main extends JFrame implements JMapViewerEventListener {
         menuBar.add(aprsMenu);
         menuBar.add(staticSignalLocationMenu);
         menuBar.add(signalAnalysisMenu);
+        menuBar.add(databaseConfigMenu);
         menuBar.add(helpMenu);
 
-        aprsComponentMenuItem = new JMenuItem(" APRS Settings ");
-        gpsComponentMenuItem = new JMenuItem(" GPS Settings ");
-        receiverComponentMenuItem = new JMenuItem(" Receiver Settings ");
-        coverageTestSettingsMenuItem = new JMenuItem(" Coverage Test Settings ");
-        mapSettingsMenuItem = new JMenuItem(" Map Settings ");
-        mapBulkDownloaderMenuItem = new JMenuItem(" Bulk Downloader ");
-        mapLayerSelectorMenuItem = new JMenuItem(" Layer Selector ");
-        mapStatisticsMenuItem = new JMenuItem(" Statistics Panel ");
-        mapClearMenuItem = new JMenuItem(" Clear Map ");
-        newDataFileMenuItem = new JMenuItem(" New Database File ");
-        openDataFileMenuItem = new JMenuItem(" Open Database File ");
-        closeDataFileMenuItem = new JMenuItem(" Close Database File ");
-        saveDataFileMenuItem = new JMenuItem(" Save Database File ");
-        saveAsDataFileMenuItem = new JMenuItem(" Save Database File As ");
-        printPreviewMenuItem = new JMenuItem(" Print Preview ");
-        printMenuItem = new JMenuItem(" Print... ");
-        exitMenuItem = new JMenuItem(" Exit ");
-        staticSignalLocationSettingsMenuItem = new JMenuItem(" Static Signal Location Settings ");
-        signalAnalysisMenuItem = new JMenuItem(" Signal Analysis Monitor ");
-        aboutMenuItem = new JMenuItem(" About SignalTrack ");
+        aprsComponentMenuItem = new JMenuItem(" APRS Settings "); 
+        gpsComponentMenuItem = new JMenuItem(" GPS Settings "); 
+        receiverComponentMenuItem = new JMenuItem(" Receiver Settings "); 
+        coverageTestSettingsMenuItem = new JMenuItem(" Coverage Test Settings "); 
+        mapSettingsMenuItem = new JMenuItem(" Map Settings "); 
+        mapBulkDownloaderMenuItem = new JMenuItem(" Bulk Downloader "); 
+        mapLayerSelectorMenuItem = new JMenuItem(" Layer Selector "); 
+        mapStatisticsMenuItem = new JMenuItem(" Statistics Panel "); 
+        mapClearMenuItem = new JMenuItem(" Clear Map "); 
+        newDataFileMenuItem = new JMenuItem(" New Database File "); 
+        openDataFileMenuItem = new JMenuItem(" Open Database File "); 
+        closeDataFileMenuItem = new JMenuItem(" Close Database File "); 
+        saveDataFileMenuItem = new JMenuItem(" Save Database File "); 
+        saveAsDataFileMenuItem = new JMenuItem(" Save Database File As "); 
+        printPreviewMenuItem = new JMenuItem(" Print Preview "); 
+        printMenuItem = new JMenuItem(" Print... "); 
+        exitMenuItem = new JMenuItem(" Exit "); 
+        staticSignalLocationSettingsMenuItem = new JMenuItem(" Static Signal Location Settings "); 
+        signalAnalysisMenuItem = new JMenuItem(" Signal Analysis Monitor "); 
+        databaseConfigMenuItem = new JMenuItem(" Database Configuration "); 
+        aboutMenuItem = new JMenuItem(" About SignalTrack "); 
 
         fileMenu.add(newDataFileMenuItem);
         fileMenu.add(openDataFileMenuItem);
@@ -562,6 +566,8 @@ public class Main extends JFrame implements JMapViewerEventListener {
         staticSignalLocationMenu.add(staticSignalLocationSettingsMenuItem);
         
         signalAnalysisMenu.add(signalAnalysisMenuItem);
+        
+        databaseConfigMenu.add(databaseConfigMenuItem);
 
         helpMenu.add(aboutMenuItem);
 
@@ -600,37 +606,28 @@ public class Main extends JFrame implements JMapViewerEventListener {
         aprsCD = new JLabel();
         markerID = new JLabel();
         recordCountLabel = new JLabel();
-        recordPointerLabel = new JLabel();
         logFileNameLabel = new JLabel();
         currentMGRS = new JLabel();
         cursorMGRS = new JLabel();
         currentGridSquare = new JLabel();
         cursorTestTileReference = new JLabel();
         measurementPeriod = new JLabel();
-        measurementsThisGrid = new JLabel();
-        radioTxDataWord = new JLabel();
-        radioRxDataWord = new JLabel();
-        tileCount = new JLabel();
+        measurementsThisTile = new JLabel();
+        maxMeasurementsPerTile = new JLabel();
+        minMeasurementsPerTile = new JLabel();
+        tilesCompleted = new JLabel();
+        totalTiles = new JLabel();
         averageRssiInCurrentTile = new JLabel();
         averageBerInCurrentTile = new JLabel();
         averageSinadInCurrentTile = new JLabel();
-        recordFormat = new DecimalFormat("00000000");
-        latFormat = new DecimalFormat("00.000000");
-        lonFormat = new DecimalFormat("000.000000");
-        speedFormat = new DecimalFormat("###0.0");
-        dBmFormat = new DecimalFormat("#000");
-        berFormat = new DecimalFormat("##0.00");
-        markerFormat = new DecimalFormat("00000");
-        measurementPeriodFormat = new DecimalFormat("##00");
-        measurementsTakenFormat = new DecimalFormat("##0");
-        sinadFormat = new DecimalFormat("#0");
         aprsComponent = new AprsComponent();
-        coverageTestSettings = new CoverageTestSettings(doStartClearAllPrefs);
+        coverageTestSettings = new CoverageTestSettings(clearAllPrefs);
+        databaseConfig = new DatabaseConfiguration(clearAllPrefs);
         mapSettings = new MapSettings();
         staticTestSettings = new StaticTestSettings();
         signalAnalysis = new SignalAnalysis();
-        radioComponent = new RadioComponent(startRadioArg, doStartClearAllPrefs);
-        serialGPSComponent = new SerialGPSComponent(startGpsArg, doStartClearAllPrefs);
+        radioComponent = new RadioComponent(startRadioArg, clearAllPrefs);
+        serialGPSComponent = new SerialGPSComponent(startGpsArg, clearAllPrefs);
         
         if (startMapArg != -1) {
         	mapSettings.setMapType(startMapArg);
@@ -638,7 +635,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
         
         switch (mapSettings.getMapType()) {
             case 0:
-                map = new ImageMap(systemPref.getInt("SelectedMapIndex", -1));
+                map = new ImageMap(systemPref.getInt("SelectedMapIndex", -1)); 
                 map.setScale(startupScale);
                 break;
             case 1:
@@ -647,21 +644,15 @@ public class Main extends JFrame implements JMapViewerEventListener {
             case 2:
                 map = new OpenStreetMapPanel(startupLonLat, startupZoom, PREFERRED_MAP_SIZE);
                 break;
+            default:
+            	break;
         }
-
-        updateStaticTestSettings(null);
-        updateMapSettings();
-        
-        nicCheck = new NetworkInterfaceCheck();
     }
 
     private void initializeListeners() {
     	mapMouseListener = new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                if (e.getButton() == MouseEvent.BUTTON1 && e.getClickCount() == 2) {
-                    map.getAttribution().handleAttribution(e.getPoint(), true);
-                }
                 if (e.getButton() == MouseEvent.BUTTON1 && e.getClickCount() == 1) {
         			mapPanelLeftMouseButtonClicked(e);
         		}
@@ -691,9 +682,10 @@ public class Main extends JFrame implements JMapViewerEventListener {
         mapMouseMotionListener = new MouseAdapter() {
             @Override
             public void mouseMoved(MouseEvent e) {
-                mapPanelMouseMoved(map.getMouseCoordinates());
-                Point p = e.getPoint();
-                boolean cursorHand = map.getAttribution().handleAttributionCursor(p);
+                mapPanelMouseMoved(map.getMouseCoordinates(), 
+                		coverageTestSettings.getTileSizeArcSeconds(map.getMouseCoordinates().getY()),
+                		coverageTestSettings.getGridReference(), coverageTestSettings.getGridSize());
+                boolean cursorHand = map.getAttribution().handleAttributionCursor(e.getPoint());
                 if (cursorHand) {
                     map.setCursor(new Cursor(Cursor.HAND_CURSOR));
                 } else {
@@ -704,6 +696,24 @@ public class Main extends JFrame implements JMapViewerEventListener {
             public void mouseDragged(MouseEvent e) {
             	mapPanelDragged(e);
             }
+        };
+        
+        jmvEventListener = new JMapViewerEventListener() {
+			@Override
+			public void processCommand(JMVCommandEvent command) {
+				if (command.getCommand().equals(JMVCommandEvent.Command.ZOOM)) {
+		        	updateZoomParameters((int) command.getNewValue());
+		        }
+		        if (command.getCommand().equals(JMVCommandEvent.Command.MOVE)) {
+		            
+		        }
+		        if (command.getCommand().equals(JMVCommandEvent.Command.ZOOM_IN_DISABLED)) {
+		            disableZoomIn((boolean) command.getNewValue());
+		        }
+		        if (command.getCommand().equals(JMVCommandEvent.Command.ZOOM_OUT_DISABLED)) {
+		            disableZoomOut((boolean) command.getNewValue());
+		        }
+			}
         };
         
         mapKeyListener = new KeyListener() {
@@ -739,9 +749,10 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	            	setMouseOffGlobe();
 	            }
 				if (MapInterface.MAP_READY.equals(event.getPropertyName())) {
-					tileSizeArcSeconds = coverageTestSettings.getTileSizeArcSeconds(startupLonLat.y);
 			        updateStaticTestSettings(null);
-			        updateMapSettings();
+			        updateCoverageTestSettings(null);
+			        updateMapSettings(null);
+			        updateAprsSettings(null);
 	            }
 			}
     	};
@@ -762,10 +773,10 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	            	timeStrataChangeEvent(event);
 	            }
 	            if (NetworkTime.CLOCK_STOPPED.equals(event.getPropertyName())) {
-	            	signalReadyToExit(NETWORK_CLOCK_CLOSED);
+	            	signalReadyToExit(NETWORK_CLOCK_STOPPED);
 	            }
 	            if (NetworkTime.UPDATES_STOPPED.equals(event.getPropertyName())) {
-	            	signalReadyToExit(TIME_UPDATES_CLOSED);
+	            	signalReadyToExit(TIME_UPDATES_STOPPED);
 	            }
         	}
         });
@@ -786,31 +797,70 @@ public class Main extends JFrame implements JMapViewerEventListener {
         });
         
         nicCheck.adviseOnNetworkInterfaceAvailability();
-
+        
     	databaseListener = new PropertyChangeListener() {
         	@Override
         	public void propertyChange(final PropertyChangeEvent event) {
-        		if (DataBase.OPEN.equals(event.getPropertyName())) {
-        			databaseOpenChangeListenerEvent(event);
+        		if (DerbyRelationalDatabase.DATABASE_OPEN.equals(event.getPropertyName())) {
+        			databaseOpenEvent(event);
         		}
-        		if (DataBase.CLOSED.equals(event.getPropertyName())) {
-        			databaseClosedChangeListenerEvent(event);
+        		if (DerbyRelationalDatabase.DATABASE_CLOSED.equals(event.getPropertyName())) {
+        			databaseClosedEvent(event);
         		}
-        		if (DataBase.APPENDED.equals(event.getPropertyName())) {
-        			databaseAppendedChangeListenerEvent(event);
+        		if (DerbyRelationalDatabase.DATABASE_RESTORE_PROGRESS.equals(event.getPropertyName())) {
+        			updateOpenDatabaseMonitor((int) event.getNewValue());
         		}
-        		if (DataBase.DRIVE_TEST_DATA_READY.equals(event.getPropertyName())) {
-        			databaseDriveTestDataReady(event);
+        		if (DerbyRelationalDatabase.MEASUREMENT_SET_APPENDED.equals(event.getPropertyName())) {
+        			measurementSetTableAppendedEvent(event);
         		}
-        		if (DataBase.STATIC_MEASUREMENT_DATA_READY.equals(event.getPropertyName())) {
-        			databaseStaticMeasurementDataReady(event);
+        		if (DerbyRelationalDatabase.STATIC_MEASUREMENT_APPENDED.equals(event.getPropertyName())) {
+        			staticTableAppendedEvent(event);
         		}
-        		if (DataBase.RECORD_COUNT_READY.equals(event.getPropertyName())) {
-        			databaseRecordCountReadyChangeListenerEvent(event);
+        		if (DerbyRelationalDatabase.TILE_TABLE_APPENDED.equals(event.getPropertyName())) {
+        			tileTableAppendedEvent(event);
+        		}
+        		if (DerbyRelationalDatabase.TILE_DELETED.equals(event.getPropertyName())) {
+        			tileDeletedEvent(event);
+        		}
+        		if (DerbyRelationalDatabase.MEASUREMENT_SET_RECORD_COUNT_READY.equals(event.getPropertyName())) {
+        			measurementSetRecordCountReadyEvent(event);
+        		}
+        		if (DerbyRelationalDatabase.STATIC_MEASUREMENT_COUNT_READY.equals(event.getPropertyName())) {
+        			staticRecordCountReadyEvent(event);
+        		}
+        		if (DerbyRelationalDatabase.TILE_COMPLETE_COUNT_READY.equals(event.getPropertyName())) {
+        			tileCompleteCountReadyEvent(event);
+        		}
+        		if (DerbyRelationalDatabase.TILE_COUNT_READY.equals(event.getPropertyName())) {
+        			tileRecordCountReadyEvent(event);
+        		}
+        		if (DerbyRelationalDatabase.MEASUREMENT_SET_READY.equals(event.getPropertyName())) {
+        			measurementSetDataReadyEvent(event);
+        		}
+        		if (DerbyRelationalDatabase.STATIC_MEASUREMENT_RECORD_READY.equals(event.getPropertyName())) {
+        			staticMeasurementDataReadyEvent(event);
+        		}
+        		if (DerbyRelationalDatabase.SETTINGS_READY.equals(event.getPropertyName())) {
+        			testSettingsLoadedEvent(event);
+        		}
+        		if (DerbyRelationalDatabase.TILE_READY.equals(event.getPropertyName())) {
+        			tileRecordReadyEvent(event);
+        		}
+        		if (DerbyRelationalDatabase.TILE_RETRIEVAL_PROGRESS.equals(event.getPropertyName())) {
+        			updateCoverageTestRestoreMonitorProgress((int) event.getNewValue());
+        		}
+        		if (DerbyRelationalDatabase.STATIC_RETRIEVAL_PROGRESS.equals(event.getPropertyName())) {
+        			updateStaticTestRestoreMonitorProgress((int) event.getNewValue());
+        		}
+        		if (DerbyRelationalDatabase.ALL_TILE_RECORDS_READY.equals(event.getPropertyName())) {
+        			allTileRecordsReadyEvent(event);
+        		}
+        		if (DerbyRelationalDatabase.ALL_STATIC_RECORDS_READY.equals(event.getPropertyName())) {
+        			allStaticRecordsReadyEvent(event);
         		}
         	}
         };
-    	
+        
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent event) {
@@ -837,7 +887,6 @@ public class Main extends JFrame implements JMapViewerEventListener {
 				}
 			}
         });
-        
         
         centerOnGpsButton.addActionListener(new ActionListener() {
 			@Override
@@ -866,6 +915,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
         map.addMouseListener(mapMouseListener);
         map.addMouseMotionListener(mapMouseMotionListener);
         map.addKeyListener(mapKeyListener);
+        map.addJMVListener(jmvEventListener);
         
         aprsComponent.getSerialConfig().getSerialInterface().addPropertyChangeListener(aprsSerialInterfaceListener);
         aprsComponent.getAPRSInterface().addPropertyChangeListener(aprsDeviceInterfaceListener); 
@@ -877,8 +927,6 @@ public class Main extends JFrame implements JMapViewerEventListener {
 		serialGPSComponent.addPropertyChangeListener(serialGPSComponentListener);
         serialGPSComponent.getSerialConfig().getSerialInterface().addPropertyChangeListener(gpsSerialInterfaceListener);
         serialGPSComponent.getGPSInterface().addPropertyChangeListener(gpsDeviceInterfaceListener);
-        
-        map.addJMVListener(this);
 
         gpsButton.addActionListener(new ActionListener() {
 			@Override
@@ -945,14 +993,14 @@ public class Main extends JFrame implements JMapViewerEventListener {
 			}
         });
 
-        arcButton.addActionListener(new ActionListener() {
+        learnModeButton.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent event) {
 				if (event.getID() == ActionEvent.ACTION_PERFORMED) {
-					if(arcButton.isSelected()){
-						startArcTest();
+					if(learnModeButton.isSelected()){
+						startLearnMode();
 					} else {
-						stopArcTest();
+						stopLearnMode();
 				    }
 				}
 			}
@@ -1019,17 +1067,6 @@ public class Main extends JFrame implements JMapViewerEventListener {
 				}
 			}
         });
-        
-        replayDataFileButton.addActionListener(new ActionListener() {
-			@Override
-			public void actionPerformed(ActionEvent event) {
-				if (event.getID() == ActionEvent.ACTION_PERFORMED) {
-					if (replayDataFileButton.isSelected()) {
-						startReplayLogFile();
-					}
-				}
-			}
-        });
 
         recordDataFileButton.addActionListener(new ActionListener() {
 			@Override
@@ -1041,41 +1078,11 @@ public class Main extends JFrame implements JMapViewerEventListener {
 				}
 			}
         });
-        
-        bofDataFileButton.addActionListener(new ActionListener() {
-			@Override
-			public void actionPerformed(ActionEvent event) {
-				if (event.getID() == ActionEvent.ACTION_PERFORMED) {
-					if (bofDataFileButton.isSelected()) {
-						if (dataMode != DataMode.CLOSED) {
-			                dataBase.findFirstRow();
-			    			recordPointer = dataBase.getIndexCursor();
-			    			recordPointerLabel.setText(recordFormat.format(recordPointer));
-			            }
-					}
-				}
-			}
-        });
-
-        eofDataFileButton.addActionListener(new ActionListener() {
-			@Override
-			public void actionPerformed(ActionEvent event) {
-				if (event.getID() == ActionEvent.ACTION_PERFORMED) {
-					if (eofDataFileButton.isSelected()) {
-						if (dataMode != DataMode.CLOSED) {
-			                dataBase.findLastRow();
-			    			recordPointer = dataBase.getIndexCursor();
-			    			recordPointerLabel.setText(recordFormat.format(recordPointer));
-			            }
-					}
-				}
-			}
-        });
 
         newDataFileMenuItem.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent event) {
-                createNewDataFile();
+                createNewDataFile(null);
             }
         });
 
@@ -1204,7 +1211,14 @@ public class Main extends JFrame implements JMapViewerEventListener {
                 mapClearMenuActionListenerEvent(event);
             }
         });
-
+        
+        databaseConfigMenuItem.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                databseConfigMenuActionListenerEvent(event);
+            }
+        });
+        
         aboutMenuItem.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent event) {
@@ -1308,30 +1322,32 @@ public class Main extends JFrame implements JMapViewerEventListener {
         coverageTestSettings.addPropertyChangeListener(new PropertyChangeListener() {
 			@Override
 			public void propertyChange(final PropertyChangeEvent event) {
-				coverageTestSettingsPropertyChangeEvent(event);
+				if (CoverageTestSettings.PROPERTY_CHANGE.equals(event.getPropertyName())) {
+					updateCoverageTestSettings(event);
+				}
 			}
         });
 
         aprsComponent.addPropertyChangeListener(new PropertyChangeListener() {
 			@Override
 			public void propertyChange(final PropertyChangeEvent event) {
-				aprsComponentChangeListenerEvent(event);
+				updateAprsSettings(event);
 			}
         });
 
         mapSettings.addPropertyChangeListener(new PropertyChangeListener() {
 			@Override
 			public void propertyChange(final PropertyChangeEvent event) {
-				if ("NEW_MAP_TYPE".equals(event.getPropertyName())) {
+				if ("NEW_MAP_TYPE".equals(event.getPropertyName())) { 
 					mapTypeChangedChangeListenerEvent(event);
 				}
-				if ("PROPERTY_CHANGED".equals(event.getPropertyName())) {
+				if ("PROPERTY_CHANGED".equals(event.getPropertyName())) { 
 					mapPropertyChangedChangeListenerEvent(event);
 				}
 			}
         });
         
-        String cancelName = "cancel";
+        String cancelName = "cancel"; 
         InputMap inputMap = getRootPane().getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT);
         inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), cancelName);
         ActionMap actionMap = getRootPane().getActionMap();
@@ -1385,25 +1401,25 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	    			aprsTxDataChangeListenerEvent(event);
 	    		}
 	    		if (SerialInterface.INVALID_COM_PORT.equals(event.getPropertyName())) {
-	    			invalidComPortChangeListenerEvent(event, "APRS");
+	    			invalidComPortChangeListenerEvent(event, "APRS"); 
 	    		}
 	    		if (SerialInterface.PORT_CLOSED.equals(event.getPropertyName())) {
 	    			signalReadyToExit(APRS_INTERFACE_CLOSED);
 	    		}
 	    		if (SerialInterface.SERIAL_PORT_CONFIGURATION_ERROR.equals(event.getPropertyName())) {
 	    			if (event.getNewValue().getClass().equals(Integer.class)) {
-	    				serialErrorChangeListenerEvent((int) event.getNewValue(), "APRS Port Configuration Error");
+	    				serialErrorChangeListenerEvent((int) event.getNewValue(), "APRS Port Configuration Error"); 
 	    		    }
 	    		    else if (event.getNewValue().getClass().equals(String.class)) {
-	    		    	serialErrorChangeListenerEvent((String) event.getNewValue(), "APRS Port Configuration Error");
+	    		    	serialErrorChangeListenerEvent((String) event.getNewValue(), "APRS Port Configuration Error"); 
 	    		    }
 	    		}
 	    		if (SerialInterface.ERROR.equals(event.getPropertyName())) {
 	    			if (event.getNewValue().getClass().equals(Integer.class)) {
-	    				serialErrorChangeListenerEvent((int) event.getNewValue(), "APRS Error");
+	    				serialErrorChangeListenerEvent((int) event.getNewValue(), "APRS Error"); 
 	    		    }
 	    		    else if (event.getNewValue().getClass().equals(String.class)) {
-	    		    	serialErrorChangeListenerEvent((String) event.getNewValue(), "APRS Error");
+	    		    	serialErrorChangeListenerEvent((String) event.getNewValue(), "APRS Error"); 
 	    		    }
 	    		}
 	    	}
@@ -1423,7 +1439,11 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	    	public void propertyChange(final PropertyChangeEvent event) {
 	    		if (RadioComponent.SERIAL_PORT_ERROR.equals(event.getPropertyName())) {
 	    			resetRadioIndicators();
+	    			 stopCoverageTest();
 	    			deviceNotOnlineException((String[]) event.getNewValue());
+	    		}
+	    		if (RadioComponent.SCAN_MODE_CHANGE.equals(event.getPropertyName())) {
+	    			if (testMode != TestMode.OFF) signalMeterArray.setMeterLevels(0);
 	    		}
 	    	}
 	    };
@@ -1450,25 +1470,25 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	    			radioOnlineChangeListenerEvent(event);
 	    		}
 	    		if (SerialInterface.INVALID_COM_PORT.equals(event.getPropertyName())) {
-	    			invalidComPortChangeListenerEvent(event, "Radio");
+	    			invalidComPortChangeListenerEvent(event, "Radio"); 
 	    		}
 	    		if (SerialInterface.PORT_CLOSED.equals(event.getPropertyName())) {
 	    			signalReadyToExit(RADIO_INTERFACE_CLOSED);
 	    		}
 	    		if (SerialInterface.SERIAL_PORT_CONFIGURATION_ERROR.equals(event.getPropertyName())) {
 	    			if (event.getNewValue().getClass().equals(Integer.class)) {
-	    				serialErrorChangeListenerEvent((int) event.getNewValue(), "Radio Port Configuration Error");
+	    				serialErrorChangeListenerEvent((int) event.getNewValue(), "Radio Port Configuration Error"); 
 	    		    }
 	    		    else if (event.getNewValue().getClass().equals(String.class)) {
-	    		    	serialErrorChangeListenerEvent(event.getSource().getClass().getName(), "Radio Port Configuration Error");
+	    		    	serialErrorChangeListenerEvent(event.getSource().getClass().getName(), "Radio Port Configuration Error"); 
 	    		    }
 	    		}
 	    		if (SerialInterface.ERROR.equals(event.getPropertyName())) {
 	    			if (event.getNewValue().getClass().equals(Integer.class)) {
-	    				serialErrorChangeListenerEvent((int) event.getNewValue(), "Radio Error");
+	    				serialErrorChangeListenerEvent((int) event.getNewValue(), "Radio Error"); 
 	    		    }
 	    		    else if (event.getNewValue().getClass().equals(String.class)) {
-	    		    	serialErrorChangeListenerEvent(event.getSource().getClass().getName(), "Radio Error");
+	    		    	serialErrorChangeListenerEvent(event.getSource().getClass().getName(), "Radio Error"); 
 	    		    }
 	    		}
 	    	}
@@ -1495,6 +1515,9 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	    		if (RadioInterface.READY.equals(event.getPropertyName())) {
 	    			radioReadyChangeListenerEvent(event);
 	    		}
+	    		if (RadioInterface.SCAN_CHANNEL_READY.equals(event.getPropertyName())) {
+	    			radioScanChannelReadyChangeListenerEvent(event);
+	    		}
 	    	}
 	    };	
 	    
@@ -1509,18 +1532,18 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	    		}
 	    		if (SerialInterface.SERIAL_PORT_CONFIGURATION_ERROR.equals(event.getPropertyName())) {
 	    			if (event.getNewValue().getClass().equals(Integer.class)) {
-	    				serialErrorChangeListenerEvent((int) event.getNewValue(), "GPS Port Configuration Error");
+	    				serialErrorChangeListenerEvent((int) event.getNewValue(), "GPS Port Configuration Error"); 
 	    		    }
 	    		    else if (event.getNewValue().getClass().equals(String.class)) {
-	    		    	serialErrorChangeListenerEvent((String) event.getNewValue(), "GPS Port Configuration Error");
+	    		    	serialErrorChangeListenerEvent((String) event.getNewValue(), "GPS Port Configuration Error"); 
 	    		    }
 	    		}
 	    		if (SerialInterface.ERROR.equals(event.getPropertyName())) {
 	    			if (event.getNewValue().getClass().equals(Integer.class)) {
-	    				serialErrorChangeListenerEvent((int) event.getNewValue(), "GPS Error");
+	    				serialErrorChangeListenerEvent((int) event.getNewValue(), "GPS Error"); 
 	    		    }
 	    		    else if (event.getNewValue().getClass().equals(String.class)) {
-	    		    	serialErrorChangeListenerEvent((String) event.getNewValue(), "GPS Error");
+	    		    	serialErrorChangeListenerEvent((String) event.getNewValue(), "GPS Error"); 
 	    		    }
 	    		}
 	    		if (SerialInterface.DSR.equals(event.getPropertyName())) {
@@ -1533,7 +1556,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	    			gpsCDHoldingPropertyChangeListenerEvent(event);
 	    		}
 	    		if (SerialInterface.INVALID_COM_PORT.equals(event.getPropertyName())) {
-	    			invalidComPortChangeListenerEvent(event, "GPS");
+	    			invalidComPortChangeListenerEvent(event, "GPS"); 
 	    		}
 	    		if (SerialInterface.ONLINE.equals(event.getPropertyName())) {
 	    			gpsOnlineChangeListenerEvent(event);
@@ -1594,21 +1617,37 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	    };
     }
     
-    private void setMouseOffGlobe() {
+    void setMouseOffGlobe() {
     	mouseOffGlobe = true;
-		setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
-		cursorTestTileReference.setText("Off Globe");
-		cursorMGRS.setText("");
-		cursorLongitude.setText("");
-		cursorLatitude.setText("");
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+				setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
+				cursorTestTileReference.setText("Off Globe"); 
+				cursorMGRS.setText(""); 
+				cursorLongitude.setText(""); 
+				cursorLatitude.setText(""); 
+            }
+        });
     }
-    
+
     private void timeStrataChangeEvent(final PropertyChangeEvent event) {
-    	setUTCLabelColors((int) event.getNewValue());
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	setUTCLabelColors((int) event.getNewValue());
+            }
+        });
     }
     
     private void networkClockUpdate(final PropertyChangeEvent event) {
-    	utcLabel.setText(event.getNewValue() + " Z");
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	utcLabel.setText(event.getNewValue() + " Z");
+            	setStrataTextTag(networkTime.getTimeStratum(), utcLabel);
+            }
+        });
     }
 
     private void networkClockFailure(final PropertyChangeEvent event) {
@@ -1635,6 +1674,18 @@ public class Main extends JFrame implements JMapViewerEventListener {
     	if (timeStrata == NetworkTime.STRATUM_UNSYNC) {
 			utcLabel.setBackground(Color.RED);
 	    	utcLabel.setForeground(Color.BLACK);
+    	}
+    }
+    
+    private void setStrataTextTag(final int timeStrata, JLabel utcLabel) {
+    	if (timeStrata == NetworkTime.STRATUM_GPS) {
+    		utcLabel.setText(utcLabel.getText() + "  STR GPS");
+    	}
+    	else if (timeStrata >= NetworkTime.STRATUM_NTP0 && timeStrata <= NetworkTime.STRATUM_NTP15) {
+    		utcLabel.setText(utcLabel.getText() + "  STR NTP" + String.valueOf(timeStrata));
+    	}
+    	else if (timeStrata == NetworkTime.STRATUM_UNSYNC) {
+    		utcLabel.setText(utcLabel.getText() + "  UNSYNC");
     	}
     }
     
@@ -1689,7 +1740,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
 
     private void moveRdfBearing(final int index, final Point.Double p1, final double bearing, 
     		final double length, final int quality, final Color color) {
-    	map.hideLine(index);
+    	map.deleteLine(index);
         bearingList.remove(index);
         
         bearingList.add(index, new Bearing(index, p1, bearing, length, quality, color));
@@ -1701,12 +1752,12 @@ public class Main extends JFrame implements JMapViewerEventListener {
     }
 
     private void aboutMenuActionListenerEvent(ActionEvent event) {
-        SwingUtilities.invokeLater(new Runnable() {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                    "SignalTrack version 7.3.1036" + System.lineSeparator() + "(c) Copyright John R. Chartkoff, 2015.  All rights reserved.",
-                    "About SignalTrack", JOptionPane.INFORMATION_MESSAGE);
+                    "SignalTrack version 7.3.1036" + System.lineSeparator() + "(c) Copyright John R. Chartkoff, 2015.  All rights reserved.", 
+                    "About SignalTrack", JOptionPane.INFORMATION_MESSAGE); 
             }
         });
     }
@@ -1717,11 +1768,11 @@ public class Main extends JFrame implements JMapViewerEventListener {
         try {
 	        final String eventMessage = serialPortErrorMessage(event);
 	        log.log(Level.WARNING, errorText, eventMessage);
-	        SwingUtilities.invokeLater(new Runnable() {
+	        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
 	            @Override
 	            public void run() {
 	                JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-	                	"Serial Port " + eventMessage, errorText, JOptionPane.ERROR_MESSAGE);
+	                	"Serial Port " + eventMessage, errorText, JOptionPane.ERROR_MESSAGE); 
 	                serialErrorQueued = false;
 	            }
 	        });
@@ -1735,7 +1786,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
     	serialErrorQueued = true;
     	try {
 	        log.log(Level.WARNING, errorText, event);
-	        SwingUtilities.invokeLater(new Runnable() {
+	        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
 	            @Override
 	            public void run() {
 	            	JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
@@ -1750,84 +1801,89 @@ public class Main extends JFrame implements JMapViewerEventListener {
 
     private void gpsCRCErrorEvent(final PropertyChangeEvent event) {
     	if (event.getNewValue() == null) return;
-        log.log(Level.INFO, "GPS_CRC_Error", event.getNewValue());
-        SwingUtilities.invokeLater(new Runnable() {
+        log.log(Level.INFO, "GPS_CRC_Error", event.getNewValue()); 
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
             	String message = (String) event.getNewValue();
 	            String formattedMsg = message.substring(0,Math.min(50,message.length()));
             	JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-	                formattedMsg, "GPS CRC Error", JOptionPane.ERROR_MESSAGE);
+	                formattedMsg, "GPS CRC Error", JOptionPane.ERROR_MESSAGE); 
             }
         });
     }
     
     private String serialPortErrorMessage(final int eventMask) {
         switch (eventMask) {
-        	case 1: return "Parameter Configuration Error";
-	        case 2: return "Buffer Overrun Error";
-	        case 4: return "Parity Mismatch Error";
-	        case 8: return "Framing Error";
-	        case 16: return "Data Terminal Ready (DTR) Line Not Set As Requested";
-	        case 32: return "Ready To Send (RTS) Line Not Set As Requested";
-	        case 64: return "Event Mask Not Set As Requested";
-	        case 128: return "Flow Control Not Set As Requested";
-	        case 256: return "Port Not Purged";
-	        case 512: return "Break Interrupt";
-	        case 1024: return "Transmit Error";
-	        case 2048: return "Framing Error";
-	        case 4096: return "Buffer Overrun Error";
-	        case 8192: return "Parity Mismatch Error";
-	        default: return "Unspecified Serial Communications Error";
+        	case 1: return "Parameter Configuration Error"; 
+	        case 2: return "Buffer Overrun Error"; 
+	        case 4: return "Parity Mismatch Error"; 
+	        case 8: return "Framing Error"; 
+	        case 16: return "Data Terminal Ready (DTR) Line Not Set As Requested"; 
+	        case 32: return "Ready To Send (RTS) Line Not Set As Requested"; 
+	        case 64: return "Event Mask Not Set As Requested"; 
+	        case 128: return "Flow Control Not Set As Requested"; 
+	        case 256: return "Port Not Purged"; 
+	        case 512: return "Break Interrupt"; 
+	        case 1024: return "Transmit Error"; 
+	        case 2048: return "Framing Error"; 
+	        case 4096: return "Buffer Overrun Error"; 
+	        case 8192: return "Parity Mismatch Error"; 
+	        default: return "Unspecified Serial Communications Error"; 
         }
     }
     
     private void mapClearMenuActionListenerEvent(final ActionEvent event) {
-        map.deleteAllSignalMarkers();
+    	map.deleteAllSignalMarkers();
         map.deleteAllIcons();
         map.deleteAllLines();
         map.deleteAllQuads();
         map.deleteAllRings();
         map.deleteAllArcs();
-        map.deleteAllPolygons();
+        map.deleteAllTestTiles();
         map.deleteAllArcIntersectPoints();
     }
 
     private void aprsWaypointListenerEvent(final PropertyChangeEvent event) {
-        boolean found = false;
-        for (AprsIcon ai : iconList) {
-            if (aprsComponent.getAPRSInterface().getAprsIdentifier().contains(ai.getIdentifier())) {
-                map.moveIcon(ai.getIndex(), aprsComponent.getAPRSInterface().getAprsPosition());
-                found = true;
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	boolean found = false;
+		        for (AprsIcon ai : iconList) {
+		            if (aprsComponent.getAPRSInterface().getAprsIdentifier().contains(ai.getIdentifier())) {
+		                map.moveIcon(ai.getIndex(), aprsComponent.getAPRSInterface().getAprsPosition());
+		                found = true;
+		            }
+		        }
+		        if (!found) {
+		            String newSsidPath = System.getProperty("user.home") + File.separator + "maps" + File.separator +  
+		            	Utility.getIconPathNameFromSSID(Utility.parseSSID(aprsComponent.getAPRSInterface().getAprsIdentifier()));
+		            map.addIcon(aprsComponent.getAPRSInterface().getAprsPosition(), 
+		            	newSsidPath, aprsComponent.getAPRSInterface().getAprsIdentifier());
+		            iconList.add(new AprsIcon(iconList.size(), aprsComponent.getAPRSInterface().getAprsPosition(), 
+		            	aprsComponent.getAPRSInterface().getAprsIdentifier()));
+		        }
+		        aprsGPWPLSentence.setText(" " + aprsComponent.getAPRSInterface().getGPWPLMessageString()); 
+		        aprsLatitude.setText(String.format("%8f", aprsComponent.getAPRSInterface().getAprsPosition().y)); 
+		        aprsLongitude.setText(String.format("%9f", aprsComponent.getAPRSInterface().getAprsPosition().x)); 
+		        aprsCallSign.setText(Utility.parseCallSign(aprsComponent.getAPRSInterface().getAprsIdentifier())
+		            + " - " + Utility.parseSSID(aprsComponent.getAPRSInterface().getAprsIdentifier())); 
+		        aprsSSID.setText(Utility.parseSSID(aprsComponent.getAPRSInterface().getAprsIdentifier()));
             }
-        }
-        if (!found) {
-            String newSsidPath = System.getProperty("user.home") + File.separator + "maps" + File.separator + 
-            	Utility.getIconPathNameFromSSID(Utility.parseSSID(aprsComponent.getAPRSInterface().getAprsIdentifier()));
-            map.addIcon(aprsComponent.getAPRSInterface().getAprsPosition(), 
-            	newSsidPath, aprsComponent.getAPRSInterface().getAprsIdentifier());
-            iconList.add(new AprsIcon(iconList.size(), aprsComponent.getAPRSInterface().getAprsPosition(), 
-            	aprsComponent.getAPRSInterface().getAprsIdentifier()));
-        }
-        aprsGPWPLSentence.setText(" " + aprsComponent.getAPRSInterface().getGPWPLMessageString());
-        aprsLatitude.setText(latFormat.format(aprsComponent.getAPRSInterface().getAprsPosition().y));
-        aprsLongitude.setText(lonFormat.format(aprsComponent.getAPRSInterface().getAprsPosition().x));
-        aprsCallSign.setText(Utility.parseCallSign(aprsComponent.getAPRSInterface().getAprsIdentifier())
-            + " - " + Utility.parseSSID(aprsComponent.getAPRSInterface().getAprsIdentifier()));
-        aprsSSID.setText(Utility.parseSSID(aprsComponent.getAPRSInterface().getAprsIdentifier()));
+        });
     }
 
     private void initializeLookAndFeel() {
-    	System.setProperty("java.net.useSystemProxies", "true");
+    	System.setProperty("java.net.useSystemProxies", "true"); 
         if (Configuration.isMacOS()) {
-            System.setProperty("apple.laf.useScreenMenuBar", "true");
-            System.setProperty("com.apple.mrj.application.apple.menu.about.name", "NASA World Wind");
-            System.setProperty("com.apple.mrj.application.growbox.intrudes", "false");
-            System.setProperty("apple.awt.brushMetalLook", "true");
+            System.setProperty("apple.laf.useScreenMenuBar", "true"); 
+            System.setProperty("com.apple.mrj.application.apple.menu.about.name", "NASA World Wind"); 
+            System.setProperty("com.apple.mrj.application.growbox.intrudes", "false"); 
+            System.setProperty("apple.awt.brushMetalLook", "true"); 
         } else if (Configuration.isWindowsOS()) {
 	        try {
-	        	System.setProperty("sun.awt.noerasebackground", "true");
-	            UIManager.setLookAndFeel("javax.swing.plaf.metal.MetalLookAndFeel");
+	        	System.setProperty("sun.awt.noerasebackground", "true"); 
+	            UIManager.setLookAndFeel("javax.swing.plaf.metal.MetalLookAndFeel"); 
 	            setDefaultLookAndFeelDecorated(true);
 	            setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
 	        } catch (UnsupportedLookAndFeelException ex) {
@@ -1841,8 +1897,8 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	        }
         } else if (Configuration.isLinuxOS()) {
     		try {
-    			System.setProperty("sun.awt.noerasebackground", "true");
-			    UIManager.setLookAndFeel("javax.swing.plaf.metal.MetalLookAndFeel");
+    			System.setProperty("sun.awt.noerasebackground", "true"); 
+			    UIManager.setLookAndFeel("javax.swing.plaf.metal.MetalLookAndFeel"); 
 				setDefaultLookAndFeelDecorated(true);
 	            setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
 			} catch (UnsupportedLookAndFeelException ex) {
@@ -1858,150 +1914,138 @@ public class Main extends JFrame implements JMapViewerEventListener {
     }
     
     private void createToolBar() { 
+    	try {
+			new IconRetriever(zoomOutButton, getClass().getResource("/bin/images/112_Minus_Green_16x16_72.png")); 
+			zoomOutButton.setFocusable(false);
+			zoomOutButton.setRolloverEnabled(true);
+			zoomOutButton.setMultiClickThreshhold(50L);
+			zoomOutButton.setToolTipText("Zoom Out"); 
+			
+			new IconRetriever(zoomInButton, getClass().getResource("/bin/images/112_Plus_Green_16x16_72.png")); 
+			zoomInButton.setFocusable(false);
+			zoomInButton.setRolloverEnabled(true);
+			zoomInButton.setMultiClickThreshhold(50L);
+			zoomInButton.setToolTipText("Zoom In"); 
+			
+			new IconRetriever(gpsButton, getClass().getResource("/bin/images/Web.png")); 
+			gpsButton.setFocusable(false);
+			gpsButton.setRolloverEnabled(true);
+			gpsButton.setMultiClickThreshhold(50L);
+			gpsButton.setToolTipText("Enable GPS Receiver"); 
+			
+			new IconRetriever(centerOnGpsButton, getClass().getResource("/bin/images/recenterOnLocationButtonImage.jpg")); 
+			centerOnGpsButton.setEnabled(false);
+			centerOnGpsButton.setFocusable(false);
+			centerOnGpsButton.setRolloverEnabled(true);
+			centerOnGpsButton.setMultiClickThreshhold(50L);
+			centerOnGpsButton.setToolTipText("Center Map on GPS Location"); 
+	
+			radioButton.setText("RADIO"); 
+			radioButton.setPreferredSize(BUTTON_DIM);
+			radioButton.setFont(new Font("Calibri", Font.BOLD, 12)); 
+			radioButton.setForeground(Color.BLUE);
+			radioButton.setRolloverEnabled(true);
+			radioButton.setFocusable(false);
+			radioButton.setMultiClickThreshhold(50L);
+			radioButton.setToolTipText("Enable Radio System"); 
+	
+			sinadButton.setText("SINAD"); 
+			sinadButton.setPreferredSize(BUTTON_DIM);
+			sinadButton.setFont(new Font("Calibri", Font.BOLD, 12)); 
+			sinadButton.setForeground(Color.BLUE);
+			sinadButton.setRolloverEnabled(true);
+			sinadButton.setFocusable(false);
+			sinadButton.setMultiClickThreshhold(50L);
+			sinadButton.setToolTipText("Enable SINAD Meter"); 
+	
+			aprsButton.setText("APRS"); 
+			aprsButton.setPreferredSize(BUTTON_DIM);
+			aprsButton.setFont(new Font("Calibri", Font.BOLD, 12)); 
+			aprsButton.setForeground(Color.BLUE);
+			aprsButton.setRolloverEnabled(true);
+			aprsButton.setFocusable(false);
+			aprsButton.setMultiClickThreshhold(50L);
+			aprsButton.setToolTipText("Enable APRS Position Reporting"); 
+			
+			learnModeButton.setText("LEARN"); 
+			learnModeButton.setPreferredSize(BUTTON_DIM);
+			learnModeButton.setFont(new Font("Calibri", Font.BOLD, 12)); 
+			learnModeButton.setForeground(Color.RED);
+			learnModeButton.setRolloverEnabled(true);
+			learnModeButton.setFocusable(false);
+			learnModeButton.setMultiClickThreshhold(50L);
+			learnModeButton.setToolTipText("Learn Test Tiles to Search"); 
+	
+			coverageTestButton.setText("DRIVE"); 
+			coverageTestButton.setPreferredSize(BUTTON_DIM);
+			coverageTestButton.setFont(new Font("Calibri", Font.BOLD, 12)); 
+			coverageTestButton.setForeground(Color.RED);
+			coverageTestButton.setRolloverEnabled(true);
+			coverageTestButton.setFocusable(false);
+			coverageTestButton.setMultiClickThreshhold(50L);
+			coverageTestButton.setToolTipText("Initialize Coverage Test"); 
+	
+			staticLocationAnalysisButton.setText("RDF-S"); 
+			staticLocationAnalysisButton.setPreferredSize(BUTTON_DIM);
+			staticLocationAnalysisButton.setFont(new Font("Calibri", Font.BOLD, 12)); 
+			staticLocationAnalysisButton.setForeground(Color.RED);
+			staticLocationAnalysisButton.setRolloverEnabled(true);
+			staticLocationAnalysisButton.setFocusable(false);
+			staticLocationAnalysisButton.setMultiClickThreshhold(50L);
+			staticLocationAnalysisButton.setToolTipText("Initialize Static Signal Location Search"); 
 
-		new IconRetriever(zoomOutButton, DEFAULT_IMAGE_FILE_PATH + "112_Minus_Green_16x16_72.png");
-		zoomOutButton.setFocusable(false);
-		zoomOutButton.setRolloverEnabled(true);
-		zoomOutButton.setMultiClickThreshhold(50L);
-		zoomOutButton.setToolTipText("Zoom Out");
+			new IconRetriever(newDataFileButton, getClass().getResource("/bin/images/NewDocumentHS.png")); 
+			newDataFileButton.setFocusable(false);
+			newDataFileButton.setRolloverEnabled(true);
+			newDataFileButton.setMultiClickThreshhold(50L);
+			newDataFileButton.setToolTipText("Create New Data File"); 
+	
+			new IconRetriever(openDataFileButton, getClass().getResource("/bin/images/openHS.png")); 
+			openDataFileButton.setFocusable(false);
+			openDataFileButton.setRolloverEnabled(true);
+			openDataFileButton.setMultiClickThreshhold(50L);
+			openDataFileButton.setToolTipText("Open Data File"); 
+	
+			new IconRetriever(saveDataFileButton, getClass().getResource("/bin/images/saveHS.png")); 
+			saveDataFileButton.setFocusable(false);
+			saveDataFileButton.setRolloverEnabled(true);
+			saveDataFileButton.setMultiClickThreshhold(50L);
+			saveDataFileButton.setToolTipText("Save Data File"); 
+	
+			new IconRetriever(closeDataFileButton, getClass().getResource("/bin/images/closefile.gif")); 
+			closeDataFileButton.setFocusable(false);
+			closeDataFileButton.setRolloverEnabled(true);
+			closeDataFileButton.setMultiClickThreshhold(50L);
+			closeDataFileButton.setToolTipText("Close Data File"); 
+	
+			new IconRetriever(stopDataFileButton, getClass().getResource("/bin/images/StopHS.png")); 
+			stopDataFileButton.setFocusable(false);
+			stopDataFileButton.setRolloverEnabled(true);
+			stopDataFileButton.setMultiClickThreshhold(50L);
+			stopDataFileButton.setToolTipText("Stop Data File"); 
+	
+			new IconRetriever(recordDataFileButton, getClass().getResource("/bin/images/RecordHS.png")); 
+			recordDataFileButton.setFocusable(false);
+			recordDataFileButton.setRolloverEnabled(true);
+			recordDataFileButton.setMultiClickThreshhold(50L);
+			recordDataFileButton.setToolTipText("Record Data File"); 
+			
+	        
+			new IconRetriever(this, getClass().getResource("/bin/images/route_icon.jpg")); 
+		   	
+			new IconRetriever(newDataFileMenuItem, getClass().getResource("/bin/images/NewDocumentHS.png")); 
 		
-		new IconRetriever(zoomInButton, DEFAULT_IMAGE_FILE_PATH + "112_Plus_Green_16x16_72.png");
-		zoomInButton.setFocusable(false);
-		zoomInButton.setRolloverEnabled(true);
-		zoomInButton.setMultiClickThreshhold(50L);
-		zoomInButton.setToolTipText("Zoom In");
-		
-		new IconRetriever(gpsButton, DEFAULT_IMAGE_FILE_PATH + "Web.png");
-		gpsButton.setFocusable(false);
-		gpsButton.setRolloverEnabled(true);
-		gpsButton.setMultiClickThreshhold(50L);
-		gpsButton.setToolTipText("Enable GPS Receiver");
-		
-		new IconRetriever(centerOnGpsButton, DEFAULT_IMAGE_FILE_PATH + "recenterOnLocationButtonImage.jpg");
-		centerOnGpsButton.setEnabled(false);
-		centerOnGpsButton.setFocusable(false);
-		centerOnGpsButton.setRolloverEnabled(true);
-		centerOnGpsButton.setMultiClickThreshhold(50L);
-		centerOnGpsButton.setToolTipText("Center Map on GPS Location");
-
-		radioButton.setText("RADIO");
-		radioButton.setPreferredSize(BUTTON_DIM);
-		radioButton.setFont(new Font("Calibri", Font.BOLD, 12));
-		radioButton.setForeground(Color.BLUE);
-		radioButton.setRolloverEnabled(true);
-		radioButton.setFocusable(false);
-		radioButton.setMultiClickThreshhold(50L);
-		radioButton.setToolTipText("Enable Radio System");
-
-		sinadButton.setText("SINAD");
-		sinadButton.setPreferredSize(BUTTON_DIM);
-		sinadButton.setFont(new Font("Calibri", Font.BOLD, 12));
-		sinadButton.setForeground(Color.BLUE);
-		sinadButton.setRolloverEnabled(true);
-		sinadButton.setFocusable(false);
-		sinadButton.setMultiClickThreshhold(50L);
-		sinadButton.setToolTipText("Enable SINAD Meter");
-
-		aprsButton.setText("APRS");
-		aprsButton.setPreferredSize(BUTTON_DIM);
-		aprsButton.setFont(new Font("Calibri", Font.BOLD, 12));
-		aprsButton.setForeground(Color.BLUE);
-		aprsButton.setRolloverEnabled(true);
-		aprsButton.setFocusable(false);
-		aprsButton.setMultiClickThreshhold(50L);
-		aprsButton.setToolTipText("Enable APRS Position Reporting");
-		
-		arcButton.setText("ARC-S");
-		arcButton.setPreferredSize(BUTTON_DIM);
-		arcButton.setFont(new Font("Calibri", Font.BOLD, 12));
-		arcButton.setForeground(Color.RED);
-		arcButton.setRolloverEnabled(true);
-		arcButton.setFocusable(false);
-		arcButton.setMultiClickThreshhold(50L);
-		arcButton.setToolTipText("Initialize Static Arc Fault Location Search");
-
-		coverageTestButton.setText("DRIVE");
-		coverageTestButton.setPreferredSize(BUTTON_DIM);
-		coverageTestButton.setFont(new Font("Calibri", Font.BOLD, 12));
-		coverageTestButton.setForeground(Color.RED);
-		coverageTestButton.setRolloverEnabled(true);
-		coverageTestButton.setFocusable(false);
-		coverageTestButton.setMultiClickThreshhold(50L);
-		coverageTestButton.setToolTipText("Initialize Coverage Test");
-
-		staticLocationAnalysisButton.setText("RDF-S");
-		staticLocationAnalysisButton.setPreferredSize(BUTTON_DIM);
-		staticLocationAnalysisButton.setFont(new Font("Calibri", Font.BOLD, 12));
-		staticLocationAnalysisButton.setForeground(Color.RED);
-		staticLocationAnalysisButton.setRolloverEnabled(true);
-		staticLocationAnalysisButton.setFocusable(false);
-		staticLocationAnalysisButton.setMultiClickThreshhold(50L);
-		staticLocationAnalysisButton.setToolTipText("Initialize Static Signal Location Search");
-		
-		new IconRetriever(newDataFileButton, DEFAULT_IMAGE_FILE_PATH + "NewDocumentHS.png");
-		newDataFileButton.setFocusable(false);
-		newDataFileButton.setRolloverEnabled(true);
-		newDataFileButton.setMultiClickThreshhold(50L);
-		newDataFileButton.setToolTipText("Create New Data File");
-
-		new IconRetriever(openDataFileButton, DEFAULT_IMAGE_FILE_PATH + "openHS.png");
-		openDataFileButton.setFocusable(false);
-		openDataFileButton.setRolloverEnabled(true);
-		openDataFileButton.setMultiClickThreshhold(50L);
-		openDataFileButton.setToolTipText("Open Data File");
-
-		new IconRetriever(saveDataFileButton, DEFAULT_IMAGE_FILE_PATH + "saveHS.png");
-		saveDataFileButton.setFocusable(false);
-		saveDataFileButton.setRolloverEnabled(true);
-		saveDataFileButton.setMultiClickThreshhold(50L);
-		saveDataFileButton.setToolTipText("Save Data File");
-
-		new IconRetriever(closeDataFileButton, DEFAULT_IMAGE_FILE_PATH + "closefile.gif");
-		closeDataFileButton.setFocusable(false);
-		closeDataFileButton.setRolloverEnabled(true);
-		closeDataFileButton.setMultiClickThreshhold(50L);
-		closeDataFileButton.setToolTipText("Close Data File");
-
-		new IconRetriever(bofDataFileButton, DEFAULT_IMAGE_FILE_PATH + "MoveFirstHS.png");
-		bofDataFileButton.setFocusable(false);
-		bofDataFileButton.setRolloverEnabled(true);
-		bofDataFileButton.setMultiClickThreshhold(50L);
-		bofDataFileButton.setToolTipText("Jump to Start of Data File");
-
-		new IconRetriever(eofDataFileButton, DEFAULT_IMAGE_FILE_PATH + "MoveLastHS.png");
-		eofDataFileButton.setFocusable(false);
-		eofDataFileButton.setRolloverEnabled(true);
-		eofDataFileButton.setMultiClickThreshhold(50L);
-		eofDataFileButton.setToolTipText("Jump to End of Data File");
-
-		new IconRetriever(stopDataFileButton, DEFAULT_IMAGE_FILE_PATH + "StopHS.png");
-		stopDataFileButton.setFocusable(false);
-		stopDataFileButton.setRolloverEnabled(true);
-		stopDataFileButton.setMultiClickThreshhold(50L);
-		stopDataFileButton.setToolTipText("Stop Data File");
-
-		new IconRetriever(replayDataFileButton, DEFAULT_IMAGE_FILE_PATH + "PlayHS.png");
-		replayDataFileButton.setFocusable(false);
-		replayDataFileButton.setRolloverEnabled(true);
-		replayDataFileButton.setMultiClickThreshhold(50L);
-		replayDataFileButton.setToolTipText("Replay Data File");
-
-		new IconRetriever(recordDataFileButton, DEFAULT_IMAGE_FILE_PATH + "RecordHS.png");
-		recordDataFileButton.setFocusable(false);
-		recordDataFileButton.setRolloverEnabled(true);
-		recordDataFileButton.setMultiClickThreshhold(50L);
-		recordDataFileButton.setToolTipText("Record Data File");
-        
+    	} catch (URISyntaxException ex) {
+			ex.printStackTrace();
+		}
+    	
 		toolBar.add(newDataFileButton);
         toolBar.add(openDataFileButton);
         toolBar.add(saveDataFileButton);
         toolBar.add(closeDataFileButton);
         toolBar.addSeparator();
-        toolBar.add(bofDataFileButton);
-        toolBar.add(replayDataFileButton);
         toolBar.add(stopDataFileButton);
         toolBar.add(recordDataFileButton);
-        toolBar.add(eofDataFileButton); 
         toolBar.addSeparator();
         toolBar.add(gpsButton);
         toolBar.add(centerOnGpsButton);
@@ -2011,7 +2055,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
         toolBar.addSeparator();
         addToToolbar(coverageTestButton);
         addToToolbar(staticLocationAnalysisButton);
-        addToToolbar(arcButton);
+        addToToolbar(learnModeButton);
         toolBar.addSeparator();
         toolBar.add(zoomInButton);
         toolBar.add(zoomOutButton);
@@ -2036,341 +2080,341 @@ public class Main extends JFrame implements JMapViewerEventListener {
         mapPanel.setOpaque(true);
         mapPanel.setBackground(Color.BLACK);
         mapPanel.setBorder(BorderFactory.createEtchedBorder(EtchedBorder.LOWERED, Color.LIGHT_GRAY, Color.GRAY));
-        
-		new IconRetriever(this, DEFAULT_IMAGE_FILE_PATH + "route_icon.jpg");
-	   	
-		new IconRetriever(newDataFileMenuItem, DEFAULT_IMAGE_FILE_PATH + "NewDocumentHS.png");
 
 		signalMeterArray.setMeterColor(Color.BLUE);
 
 		gpsStatus.setBorder(BorderFactory.createEtchedBorder());
 		gpsStatus.setHorizontalAlignment(SwingConstants.CENTER);
-		gpsStatus.setFont(new Font("Calabri", Font.BOLD, 10));
+		gpsStatus.setFont(new Font("Calabri", Font.BOLD, 10)); 
 		gpsStatus.setOpaque(true);
-		gpsStatus.setToolTipText("GPS Receive Status");
+		gpsStatus.setToolTipText("GPS Receive Status"); 
 		gpsStatus.setBackground(new Color(127, 0, 0));
-		gpsStatus.setText("OFF LINE");
+		gpsStatus.setText("OFF LINE"); 
 
 		gpsTxData.setBackground(new Color(127, 0, 0));
 		gpsTxData.setBorder(BorderFactory.createEtchedBorder());
 		gpsTxData.setOpaque(true);
-		gpsTxData.setToolTipText("GPS Port - Transmitted Data");
+		gpsTxData.setToolTipText("GPS Port - Transmitted Data"); 
 
 		gpsRxData.setBackground(new Color(127, 0, 0));
 		gpsRxData.setBorder(BorderFactory.createEtchedBorder());
 		gpsRxData.setOpaque(true);
-		gpsRxData.setToolTipText("GPS Port - Received Data");
+		gpsRxData.setToolTipText("GPS Port - Received Data"); 
 
 		gpsCTS.setBackground(new Color(127, 0, 0));
 		gpsCTS.setBorder(BorderFactory.createEtchedBorder());
 		gpsCTS.setOpaque(true);
-		gpsCTS.setToolTipText("GPS Port - Clear To Send Line Active");
+		gpsCTS.setToolTipText("GPS Port - Clear To Send Line Active"); 
 
 		gpsDSR.setBackground(new Color(127, 0, 0));
 		gpsDSR.setBorder(BorderFactory.createEtchedBorder());
 		gpsDSR.setOpaque(true);
-		gpsDSR.setToolTipText("GPS Port - Data Set Ready Line Active");
+		gpsDSR.setToolTipText("GPS Port - Data Set Ready Line Active"); 
 
 		gpsCD.setBackground(new Color(127, 0, 0));
 		gpsCD.setBorder(BorderFactory.createEtchedBorder());
 		gpsCD.setOpaque(true);
-		gpsCD.setToolTipText("GPS Port - CD Line Active");
+		gpsCD.setToolTipText("GPS Port - CD Line Active"); 
 
 		radioStatus.setBackground(new Color(127, 0, 0));
 		radioStatus.setBorder(BorderFactory.createEtchedBorder());
 		radioStatus.setHorizontalAlignment(SwingConstants.CENTER);
-		radioStatus.setFont(new Font("Calabri", Font.BOLD, 10));
-		radioStatus.setText("OFF LINE");
+		radioStatus.setFont(new Font("Calabri", Font.BOLD, 10)); 
+		radioStatus.setText("OFF LINE"); 
 		radioStatus.setOpaque(true);
-		radioStatus.setToolTipText("Radio Receive Status");
+		radioStatus.setToolTipText("Radio Receive Status"); 
 
 		radioTxData.setBackground(new Color(127, 0, 0));
 		radioTxData.setBorder(BorderFactory.createEtchedBorder());
 		radioTxData.setOpaque(true);
-		radioTxData.setToolTipText("Radio Port - Transmitted Data");
+		radioTxData.setToolTipText("Radio Port - Transmitted Data"); 
 
 		radioRxData.setBackground(new Color(127, 0, 0));
 		radioRxData.setBorder(BorderFactory.createEtchedBorder());
 		radioRxData.setOpaque(true);
-		radioRxData.setToolTipText("Radio Port - Received Data");
+		radioRxData.setToolTipText("Radio Port - Received Data"); 
 
 		radioCTS.setBackground(new Color(127, 0, 0));
 		radioCTS.setBorder(BorderFactory.createEtchedBorder());
 		radioCTS.setOpaque(true);
-		radioCTS.setToolTipText("Radio Port - Clear To Send Line Active");
+		radioCTS.setToolTipText("Radio Port - Clear To Send Line Active"); 
 
 		radioDSR.setBackground(new Color(127, 0, 0));
 		radioDSR.setBorder(BorderFactory.createEtchedBorder());
 		radioDSR.setOpaque(true);
-		radioDSR.setToolTipText("Radio Port - Data Set Ready Line Active");
+		radioDSR.setToolTipText("Radio Port - Data Set Ready Line Active"); 
 
 		radioCD.setBackground(new Color(127, 0, 0));
 		radioCD.setBorder(BorderFactory.createEtchedBorder());
 		radioCD.setOpaque(true);
-		radioCD.setToolTipText("Radio Port - CD Line Active");
+		radioCD.setToolTipText("Radio Port - CD Line Active"); 
 
 		aprsStatus.setBackground(new Color(127, 0, 0));
 		aprsStatus.setBorder(BorderFactory.createEtchedBorder());
 		aprsStatus.setHorizontalAlignment(SwingConstants.CENTER);
-		aprsStatus.setFont(new Font("Calabri", Font.BOLD, 10));
-		aprsStatus.setText("OFF LINE");
+		aprsStatus.setFont(new Font("Calabri", Font.BOLD, 10)); 
+		aprsStatus.setText("OFF LINE"); 
 		aprsStatus.setOpaque(true);
-		aprsStatus.setToolTipText("APRS Receive Status");
+		aprsStatus.setToolTipText("APRS Receive Status"); 
 
 		aprsTxData.setBackground(new Color(127, 0, 0));
 		aprsTxData.setBorder(BorderFactory.createEtchedBorder());
 		aprsTxData.setOpaque(true);
-		aprsTxData.setToolTipText("APRS Port - Transmitted Data");
+		aprsTxData.setToolTipText("APRS Port - Transmitted Data"); 
 
 		aprsRxData.setBackground(new Color(127, 0, 0));
 		aprsRxData.setBorder(BorderFactory.createEtchedBorder());
 		aprsRxData.setOpaque(true);
-		aprsRxData.setToolTipText("APRS Port - Received Data");
+		aprsRxData.setToolTipText("APRS Port - Received Data"); 
 
 		aprsCTS.setBackground(new Color(127, 0, 0));
 		aprsCTS.setBorder(BorderFactory.createEtchedBorder());
 		aprsCTS.setOpaque(true);
-		aprsCTS.setToolTipText("APRS Port - Clear To Send Line Active");
+		aprsCTS.setToolTipText("APRS Port - Clear To Send Line Active"); 
 
 		aprsDSR.setBackground(new Color(127, 0, 0));
 		aprsDSR.setBorder(BorderFactory.createEtchedBorder());
 		aprsDSR.setOpaque(true);
-		aprsDSR.setToolTipText("APRS Port - Data Set Ready Line Active");
+		aprsDSR.setToolTipText("APRS Port - Data Set Ready Line Active"); 
 
 		aprsCD.setBackground(new Color(127, 0, 0));
 		aprsCD.setBorder(BorderFactory.createEtchedBorder());
 		aprsCD.setOpaque(true);
-		aprsCD.setToolTipText("APRS Port - CD Line Active");
+		aprsCD.setToolTipText("APRS Port - CD Line Active"); 
 
 		aprsGPWPLSentence.setBorder(BorderFactory.createEtchedBorder());
 		aprsGPWPLSentence.setHorizontalAlignment(SwingConstants.LEFT);
-		aprsGPWPLSentence.setFont(new Font("Courier New", 0, 11));
-		aprsGPWPLSentence.setToolTipText("APRS $GPWPL Waypoint Sentence");
+		aprsGPWPLSentence.setFont(new Font("Courier New", 0, 11)); 
+		aprsGPWPLSentence.setToolTipText("APRS $GPWPL Waypoint Sentence"); 
 
 		for (int i = 0; i < signalQuality.length; i++) {
 			signalQuality[i] = new JLabel();
 			signalQuality[i].setBorder(BorderFactory.createEtchedBorder());
 			signalQuality[i].setHorizontalAlignment(SwingConstants.CENTER);
-			signalQuality[i].setFont(new Font("Calabri", Font.PLAIN, 11));
-			signalQuality[i].setToolTipText("RSSI (dBm) of Channel " + i);
-			signalQuality[i].setText("");
+			signalQuality[i].setFont(new Font("Calabri", Font.PLAIN, 11)); 
+			signalQuality[i].setToolTipText("RSSI (dBm) of Channel " + i); 
+			signalQuality[i].setText(""); 
 		}
 
 		aprsLatitude.setBorder(BorderFactory.createEtchedBorder());
 		aprsLatitude.setHorizontalAlignment(SwingConstants.CENTER);
-		aprsLatitude.setFont(new Font("Calabri", Font.PLAIN, 11));
-		aprsLatitude.setToolTipText("APRS Latitude");
+		aprsLatitude.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		aprsLatitude.setToolTipText("APRS Latitude"); 
 
 		aprsLongitude.setBorder(BorderFactory.createEtchedBorder());
 		aprsLongitude.setHorizontalAlignment(SwingConstants.CENTER);
-		aprsLongitude.setFont(new Font("Calabri", Font.PLAIN, 11));
-		aprsLongitude.setToolTipText("APRS Longitude");
+		aprsLongitude.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		aprsLongitude.setToolTipText("APRS Longitude"); 
 
 		aprsCallSign.setBorder(BorderFactory.createEtchedBorder());
 		aprsCallSign.setHorizontalAlignment(SwingConstants.CENTER);
-		aprsCallSign.setFont(new Font("Calabri", Font.PLAIN, 11));
-		aprsCallSign.setToolTipText("APRS Call Sign");
+		aprsCallSign.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		aprsCallSign.setToolTipText("APRS Call Sign"); 
 
 		aprsSSID.setBorder(BorderFactory.createEtchedBorder());
 		aprsSSID.setHorizontalAlignment(SwingConstants.CENTER);
-		aprsSSID.setFont(new Font("Calabri", Font.PLAIN, 11));
-		aprsSSID.setToolTipText("APRS Service Set Identifier");
+		aprsSSID.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		aprsSSID.setToolTipText("APRS Service Set Identifier"); 
 
 		markerID.setBorder(BorderFactory.createEtchedBorder());
 		markerID.setHorizontalAlignment(SwingConstants.CENTER);
-		markerID.setFont(new Font("Calabri", Font.PLAIN, 11));
-		markerID.setToolTipText("Record Marker");
-		markerID.setText(markerFormat.format(markerCounter));
-
-		recordPointerLabel.setBorder(BorderFactory.createEtchedBorder());
-		recordPointerLabel.setHorizontalAlignment(SwingConstants.CENTER);
-		recordPointerLabel.setFont(new Font("Calabri", Font.PLAIN, 11));
-		recordPointerLabel.setToolTipText("Record Pointer");
+		markerID.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		markerID.setToolTipText("Record Marker"); 
 
 		recordCountLabel.setBorder(BorderFactory.createEtchedBorder());
 		recordCountLabel.setHorizontalAlignment(SwingConstants.CENTER);
-		recordCountLabel.setFont(new Font("Calabri", Font.PLAIN, 11));
-		recordCountLabel.setToolTipText("Record Count");
+		recordCountLabel.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		recordCountLabel.setToolTipText("Record Count"); 
 
 		cursorMGRS.setBorder(BorderFactory.createEtchedBorder());
 		cursorMGRS.setHorizontalAlignment(SwingConstants.CENTER);
-		cursorMGRS.setFont(new Font("Calabri", Font.PLAIN, 11));
-		cursorMGRS.setToolTipText("MGRS Location of Cursor");
+		cursorMGRS.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		cursorMGRS.setToolTipText("MGRS Location of Cursor"); 
 
 		measurementPeriod.setBorder(BorderFactory.createEtchedBorder());
 		measurementPeriod.setHorizontalAlignment(SwingConstants.CENTER);
-		measurementPeriod.setFont(new Font("Calabri", Font.PLAIN, 11));
-		measurementPeriod.setToolTipText("Measurement Timer Period in Milliseconds");
+		measurementPeriod.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		measurementPeriod.setToolTipText("Measurement Timer Period in Milliseconds"); 
 
-		measurementsThisGrid.setBorder(BorderFactory.createEtchedBorder());
-		measurementsThisGrid.setHorizontalAlignment(SwingConstants.CENTER);
-		measurementsThisGrid.setVerticalAlignment(SwingConstants.CENTER);
-		measurementsThisGrid.setFont(new Font("Calabri", Font.PLAIN, 11));
-		measurementsThisGrid.setToolTipText("Measurements Taken in This Grid");
+		measurementsThisTile.setBorder(BorderFactory.createEtchedBorder());
+		measurementsThisTile.setHorizontalAlignment(SwingConstants.CENTER);
+		measurementsThisTile.setVerticalAlignment(SwingConstants.CENTER);
+		measurementsThisTile.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		measurementsThisTile.setToolTipText("Measurements Taken in This Tile"); 
 
-		tileCount.setBorder(BorderFactory.createEtchedBorder());
-		tileCount.setHorizontalAlignment(SwingConstants.CENTER);
-		tileCount.setVerticalAlignment(SwingConstants.CENTER);
-		tileCount.setFont(new Font("Calabri", Font.PLAIN, 11));
-		tileCount.setToolTipText("Total Number of Fully Measured Tiles");
-
+		tilesCompleted.setBorder(BorderFactory.createEtchedBorder());
+		tilesCompleted.setHorizontalAlignment(SwingConstants.CENTER);
+		tilesCompleted.setVerticalAlignment(SwingConstants.CENTER);
+		tilesCompleted.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		tilesCompleted.setToolTipText("Total Number of Fully Measured Tiles"); 
+		
+		totalTiles.setBorder(BorderFactory.createEtchedBorder());
+		totalTiles.setHorizontalAlignment(SwingConstants.CENTER);
+		totalTiles.setVerticalAlignment(SwingConstants.CENTER);
+		totalTiles.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		totalTiles.setToolTipText("Total Number of Tiles Designated for Testing"); 
+		
 		averageRssiInCurrentTile.setBorder(BorderFactory.createEtchedBorder());
 		averageRssiInCurrentTile.setHorizontalAlignment(SwingConstants.CENTER);
 		averageRssiInCurrentTile.setVerticalAlignment(SwingConstants.CENTER);
-		averageRssiInCurrentTile.setFont(new Font("Calabri", Font.PLAIN, 11));
-		averageRssiInCurrentTile.setToolTipText("Average RSSI in Current Tile");
+		averageRssiInCurrentTile.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		averageRssiInCurrentTile.setToolTipText("Average RSSI in Current Tile"); 
 
 		averageBerInCurrentTile.setBorder(BorderFactory.createEtchedBorder());
 		averageBerInCurrentTile.setHorizontalAlignment(SwingConstants.CENTER);
-		averageBerInCurrentTile.setFont(new Font("Calabri", Font.PLAIN, 11));
-		averageBerInCurrentTile.setToolTipText("Average BER in Current Tile");
+		averageBerInCurrentTile.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		averageBerInCurrentTile.setToolTipText("Average BER in Current Tile"); 
 
 		averageSinadInCurrentTile.setBorder(BorderFactory.createEtchedBorder());
 		averageSinadInCurrentTile.setHorizontalAlignment(SwingConstants.CENTER);
-		averageSinadInCurrentTile.setFont(new Font("Calabri", Font.PLAIN, 11));
-		averageSinadInCurrentTile.setToolTipText("Average SINAD in Current Tile");
+		averageSinadInCurrentTile.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		averageSinadInCurrentTile.setToolTipText("Average SINAD in Current Tile"); 
 
-		radioRxDataWord.setBorder(BorderFactory.createEtchedBorder());
-		radioRxDataWord.setHorizontalAlignment(SwingConstants.LEFT);
-		radioRxDataWord.setFont(new Font("Calabri", Font.PLAIN, 11));
-		radioRxDataWord.setToolTipText("Data Received From Radio");
+		minMeasurementsPerTile.setBorder(BorderFactory.createEtchedBorder());
+		minMeasurementsPerTile.setHorizontalAlignment(SwingConstants.LEFT);
+		minMeasurementsPerTile.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		minMeasurementsPerTile.setToolTipText("Minimum Measurements Required to Complete Tile"); 
 
-		radioTxDataWord.setBorder(BorderFactory.createEtchedBorder());
-		radioTxDataWord.setHorizontalAlignment(SwingConstants.LEFT);
-		radioTxDataWord.setFont(new Font("Calabri", Font.PLAIN, 11));
-		radioTxDataWord.setToolTipText("Data Sent To Radio");
+		maxMeasurementsPerTile.setBorder(BorderFactory.createEtchedBorder());
+		maxMeasurementsPerTile.setHorizontalAlignment(SwingConstants.LEFT);
+		maxMeasurementsPerTile.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		maxMeasurementsPerTile.setToolTipText("Maximum Measurements Allowed Per Tile"); 
 
 		cursorTestTileReference.setBorder(BorderFactory.createEtchedBorder());
 		cursorTestTileReference.setHorizontalAlignment(SwingConstants.CENTER);
-		cursorTestTileReference.setFont(new Font("Calabri", Font.PLAIN, 11));
-		cursorTestTileReference.setToolTipText("Test Tile Reference at Cursor");
+		cursorTestTileReference.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		cursorTestTileReference.setToolTipText("Test Tile Reference at Cursor"); 
 
 		cursorLatitude.setBorder(BorderFactory.createEtchedBorder());
 		cursorLatitude.setHorizontalAlignment(SwingConstants.CENTER);
-		cursorLatitude.setFont(new Font("Calabri", Font.PLAIN, 11));
-		cursorLatitude.setToolTipText("Latitude at Mouse Cursor");
+		cursorLatitude.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		cursorLatitude.setToolTipText("Latitude at Mouse Cursor"); 
 
 		cursorLongitude.setBorder(BorderFactory.createEtchedBorder());
 		cursorLongitude.setHorizontalAlignment(SwingConstants.CENTER);
-		cursorLongitude.setFont(new Font("Calabri", Font.PLAIN, 11));
-		cursorLongitude.setToolTipText("Longitude at Mouse Cursor");
+		cursorLongitude.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		cursorLongitude.setToolTipText("Longitude at Mouse Cursor"); 
 
 		logFileNameLabel.setBorder(BorderFactory.createEtchedBorder());
 		logFileNameLabel.setHorizontalAlignment(SwingConstants.LEFT);
-		logFileNameLabel.setFont(new Font("Courier New", Font.PLAIN, 11));
-		logFileNameLabel.setToolTipText("Data File Name");
+		logFileNameLabel.setFont(new Font("Courier New", Font.PLAIN, 11)); 
+		logFileNameLabel.setToolTipText("Data File Name"); 
 
 		cursorTerrainAMSL.setBorder(BorderFactory.createEtchedBorder());
 		cursorTerrainAMSL.setHorizontalAlignment(SwingConstants.CENTER);
-		cursorTerrainAMSL.setFont(new Font("Calabri", Font.PLAIN, 11));
-		cursorTerrainAMSL.setToolTipText("Height of Terrain Above Mean Sea Level at Cursor");
+		cursorTerrainAMSL.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		cursorTerrainAMSL.setToolTipText("Height of Terrain Above Mean Sea Level at Cursor"); 
 		
 		viewingAltitude.setBorder(BorderFactory.createEtchedBorder());
 		viewingAltitude.setHorizontalAlignment(SwingConstants.CENTER);
-		viewingAltitude.setFont(new Font("Calabri", Font.PLAIN, 11));
-		viewingAltitude.setToolTipText("Viewing Altitude");
+		viewingAltitude.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		viewingAltitude.setToolTipText("Viewing Altitude"); 
 		
 		nmeaSentenceStringLabel.setBorder(BorderFactory.createEtchedBorder());
-		nmeaSentenceStringLabel.setFont(new Font("Courier New", java.awt.Font.PLAIN, 11));
-		nmeaSentenceStringLabel.setToolTipText("Received NMEA Sentence String");
+		nmeaSentenceStringLabel.setFont(new Font("Courier New", java.awt.Font.PLAIN, 11)); 
+		nmeaSentenceStringLabel.setToolTipText("Received NMEA Sentence String"); 
 		nmeaSentenceStringLabel.setHorizontalAlignment(SwingConstants.LEFT);
 
 		utcLabel.setBorder(BorderFactory.createEtchedBorder());
-		utcLabel.setFont(new Font("Calabri", Font.PLAIN, 11));
-		utcLabel.setToolTipText("Universal Coordinated Time");
+		utcLabel.setFont(new Font("Calabri", Font.PLAIN, 11)); 
+		utcLabel.setToolTipText("Universal Coordinated Time"); 
 		utcLabel.setOpaque(true);
 		utcLabel.setHorizontalAlignment(SwingConstants.CENTER);
 
 		gpsInfoPanel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createEtchedBorder(), 
-				"GPS Information", TitledBorder.DEFAULT_JUSTIFICATION,
-		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.BOLD, 9)));
+				"GPS Information", TitledBorder.DEFAULT_JUSTIFICATION, 
+		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.BOLD, 9))); 
 		gpsInfoPanel.setOpaque(false);
 		gpsInfoPanel.setDoubleBuffered(true);
 		gpsInfoPanel.setPreferredSize(new Dimension(170,230));
 		
 		gpsCompassRose.setBorder(BorderFactory.createTitledBorder(BorderFactory.createEtchedBorder(), 
-				"GPS Heading", TitledBorder.DEFAULT_JUSTIFICATION,
-		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.BOLD, 9)));
+				"True Course Made Good", TitledBorder.DEFAULT_JUSTIFICATION, 
+		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.BOLD, 9))); 
 		gpsCompassRose.setSelectColor(Color.GRAY);
 		gpsCompassRose.setOpaque(false);
 		gpsCompassRose.setDoubleBuffered(true);
 		gpsCompassRose.setPreferredSize(new Dimension(170,170));
 		
 		signalMeterArray.setBorder(BorderFactory.createTitledBorder(BorderFactory.createEtchedBorder(), 
-				"Signal Strength", TitledBorder.DEFAULT_JUSTIFICATION,
-		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.BOLD, 9)));
+				"Signal Strength", TitledBorder.DEFAULT_JUSTIFICATION, 
+		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.BOLD, 9))); 
 		signalMeterArray.setOpaque(false);
 		signalMeterArray.setDoubleBuffered(true);
 		signalMeterArray.setPreferredSize(new Dimension(170,170));
 		
-		longitude.setFont(new Font("Calabri", Font.BOLD, 16));
+		longitude.setFont(new Font("Calabri", Font.BOLD, 16)); 
 		longitude.setHorizontalAlignment(SwingConstants.CENTER);
 		longitude.setVerticalAlignment(SwingConstants.CENTER);
-		longitude.setBorder(BorderFactory.createTitledBorder(null, "Longitude",
+		longitude.setBorder(BorderFactory.createTitledBorder(null, "Longitude", 
 		        TitledBorder.DEFAULT_JUSTIFICATION,
-		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.PLAIN, 9)));
-		longitude.setToolTipText("GPS Longitude (WGS84)");
+		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.PLAIN, 9))); 
+		longitude.setToolTipText("GPS Longitude (WGS84)"); 
 
-		latitude.setFont(new Font("Calabri", Font.BOLD, 16));
+		latitude.setFont(new Font("Calabri", Font.BOLD, 16)); 
 		latitude.setHorizontalAlignment(SwingConstants.CENTER);
 		latitude.setVerticalAlignment(SwingConstants.CENTER);
-		latitude.setBorder(BorderFactory.createTitledBorder(null, "Latitude",
+		latitude.setBorder(BorderFactory.createTitledBorder(null, "Latitude", 
 		        TitledBorder.DEFAULT_JUSTIFICATION,
-		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.PLAIN, 9)));
-		latitude.setToolTipText("GPS Latitude (WGS84)");
+		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.PLAIN, 9))); 
+		latitude.setToolTipText("GPS Latitude (WGS84)"); 
 
-		currentMGRS.setFont(new Font("Calabri", Font.BOLD, 14));
+		currentMGRS.setFont(new Font("Calabri", Font.BOLD, 14)); 
 		currentMGRS.setHorizontalAlignment(SwingConstants.CENTER);
 		currentMGRS.setVerticalAlignment(SwingConstants.CENTER);
-		currentMGRS.setBorder(BorderFactory.createTitledBorder(null, "MGRS",
+		currentMGRS.setBorder(BorderFactory.createTitledBorder(null, "MGRS", 
 		        TitledBorder.DEFAULT_JUSTIFICATION,
-		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.PLAIN, 9)));
-		currentMGRS.setToolTipText("GPS MGRS Location");
+		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.PLAIN, 9))); 
+		currentMGRS.setToolTipText("GPS MGRS Location"); 
 
-		currentGridSquare.setFont(new Font("Calabri", Font.BOLD, 14));
+		currentGridSquare.setFont(new Font("Calabri", Font.BOLD, 14)); 
 		currentGridSquare.setHorizontalAlignment(SwingConstants.CENTER);
 		currentGridSquare.setVerticalAlignment(SwingConstants.CENTER);
 		currentGridSquare.setBorder(BorderFactory.createTitledBorder(null,
-		        "Reference Grid Square", TitledBorder.DEFAULT_JUSTIFICATION,
-		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.PLAIN, 9)));
-		currentGridSquare.setToolTipText("Reference Grid Square at GPS Location");
+		        "Reference Grid Square", TitledBorder.DEFAULT_JUSTIFICATION, 
+		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.PLAIN, 9))); 
+		currentGridSquare.setToolTipText("Reference Grid Square at GPS Location"); 
 
-		speedMadeGood.setFont(new Font("Calabri", Font.BOLD, 12));
+		speedMadeGood.setFont(new Font("Calabri", Font.BOLD, 12)); 
 		speedMadeGood.setHorizontalAlignment(SwingConstants.CENTER);
 		speedMadeGood.setVerticalAlignment(SwingConstants.CENTER);
 		speedMadeGood.setBorder(BorderFactory.createTitledBorder(null,
-		        "Speed Made Good", TitledBorder.DEFAULT_JUSTIFICATION,
-		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.PLAIN, 9)));
+		        "Speed Made Good", TitledBorder.DEFAULT_JUSTIFICATION, 
+		        TitledBorder.DEFAULT_POSITION, new Font("Calabri", Font.PLAIN, 9))); 
 		
 		testMode = validateTestMode();
 		setToolTipText(testMode);
 
-		currentLonLat = startupLonLat;
-
 		setDataMode(DataMode.CLOSED);
+		populateCurrentTestSettingsFromCoverageTestSettingsDialog();
     }
 
     private void setToolTipText(final TestMode testMode) {
-    	for (int i = 0; i < signalQuality.length; i++) {
-    		if (testMode == TestMode.RSSI) {
-	            signalQuality[i].setToolTipText("Receive Channel " + (i + 1) + " dBm");
-	        }
-    		if (testMode == TestMode.BER) {
-	            signalQuality[i].setToolTipText("Receive Channel " + (i + 1) + " Bit Error Rate");
-	        } 
-    		if (testMode == TestMode.SINAD) {
-	            signalQuality[i].setToolTipText("Receive Channel " + (i + 1) + " SINAD");
-	        }
-    		if (testMode == TestMode.RSSI_SINAD) {
-	            signalQuality[i].setToolTipText("Receive Channel " + (i + 1) + " dBm / SINAD");
-	        }
-    		if (testMode == TestMode.RSSI_BER) {
-	            signalQuality[i].setToolTipText("Receive Channel " + (i + 1) + " dBm / Bit Error Rate");
-	        }
-    		if (testMode == TestMode.MODE_NOT_SELECTED) {
-	            signalQuality[i].setToolTipText("Receive Channel " + (i + 1) + " Test Mode Is Not Configured");
-	        }
-    	}
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	for (int i = 0; i < signalQuality.length; i++) {
+		    		if (testMode == TestMode.RSSI) {
+			            signalQuality[i].setToolTipText("Receive Channel " + (i + 1) + " dBm"); 
+			        }
+		    		if (testMode == TestMode.BER) {
+			            signalQuality[i].setToolTipText("Receive Channel " + (i + 1) + " Bit Error Rate"); 
+			        } 
+		    		if (testMode == TestMode.SINAD) {
+			            signalQuality[i].setToolTipText("Receive Channel " + (i + 1) + " SINAD"); 
+			        }
+		    		if (testMode == TestMode.RSSI_SINAD) {
+			            signalQuality[i].setToolTipText("Receive Channel " + (i + 1) + " dBm / SINAD"); 
+			        }
+		    		if (testMode == TestMode.RSSI_BER) {
+			            signalQuality[i].setToolTipText("Receive Channel " + (i + 1) + " dBm / Bit Error Rate"); 
+			        }
+		    		if (testMode == TestMode.MODE_NOT_SELECTED) {
+			            signalQuality[i].setToolTipText("Receive Channel " + (i + 1) + " Test Mode Is Not Configured"); 
+			        }
+		    	}
+            }
+        });
     }
 
     private void createGraphicalUserInterface() {
@@ -2420,46 +2464,50 @@ public class Main extends JFrame implements JMapViewerEventListener {
 		                .addGap(4)
 		                .addComponent(utcLabel, 144,144,144))
 		            .addGroup(layout.createSequentialGroup()
-		                .addComponent(logFileNameLabel, 156,156,156)
+		                .addComponent(logFileNameLabel, 147,147,147)
 		                .addGap(4)
-		                .addComponent(measurementPeriod, 55,55,55)
+		                .addComponent(measurementPeriod, 46,46,46)
 		                .addGap(4)
-		                .addComponent(measurementsThisGrid, 40,40,40)
+		                .addComponent(measurementsThisTile, 53,53,53)
 		                .addGap(4)
-		                .addComponent(tileCount, 40,40,40)
+		                .addComponent(minMeasurementsPerTile, 53,53,53)
 		                .addGap(4)
-		                .addComponent(averageRssiInCurrentTile, 60,60,60)
+		                .addComponent(maxMeasurementsPerTile, 53,53,53)
 		                .addGap(4)
-		                .addComponent(averageBerInCurrentTile, 50,50,50)
+		                .addComponent(tilesCompleted, 65,65,65)
 		                .addGap(4)
-		                .addComponent(averageSinadInCurrentTile, 50,50,50)
+		                .addComponent(totalTiles, 65,65,65)
 		                .addGap(4)
-		                .addComponent(radioRxDataWord, 155,155,155)
+		                .addComponent(averageRssiInCurrentTile, 64,64,64)
 		                .addGap(4)
-		                .addComponent(radioTxDataWord, 155,155,155)
+		                .addComponent(averageBerInCurrentTile, 64,64,64)
+		                .addGap(4)
+		                .addComponent(averageSinadInCurrentTile, 64,64,64)
+		                .addGap(4)
+		                .addComponent(recordCountLabel, 80,80,80)
 		                )
 		            .addGroup(layout.createSequentialGroup()
-	                	.addComponent(signalQuality[0], 65,65,65)
+	                	.addComponent(signalQuality[0], 70,70,70)
 	                	.addGap(4)
-	                	.addComponent(signalQuality[1], 65,65,65)
+	                	.addComponent(signalQuality[1], 70,70,70)
 	                	.addGap(4)
-	                	.addComponent(signalQuality[2], 65,65,65)
+	                	.addComponent(signalQuality[2], 70,70,70)
 	                	.addGap(4)
-	                	.addComponent(signalQuality[3], 65,65,65)
+	                	.addComponent(signalQuality[3], 70,70,70)
 	                	.addGap(4)
-	                	.addComponent(signalQuality[4], 65,65,65)
+	                	.addComponent(signalQuality[4], 70,70,70)
 	                	.addGap(4)
-	                	.addComponent(signalQuality[5], 65,65,65)
+	                	.addComponent(signalQuality[5], 70,70,70)
 	                	.addGap(4)
-	                	.addComponent(signalQuality[6], 65,65,65)
+	                	.addComponent(signalQuality[6], 70,70,70)
 	                	.addGap(4)
-	                	.addComponent(signalQuality[7], 65,65,65)
+	                	.addComponent(signalQuality[7], 70,70,70)
 	                	.addGap(4)
-	                	.addComponent(recordPointerLabel, 78,78,78)
+	                	.addComponent(signalQuality[8], 70,70,70)
 	                	.addGap(4)
-	                	.addComponent(recordCountLabel, 78,78,78)
+	                	.addComponent(signalQuality[9], 70,70,70)
 	                	.addGap(4)
-	                	.addComponent(markerID, 78,78,78)))     
+	                	.addComponent(markerID, 54,54,54)))     
 	            .addGap(5)
 	            .addGroup(layout.createParallelGroup(GroupLayout.Alignment.LEADING)
 	            	.addComponent(gpsInfoPanel, GroupLayout.Alignment.LEADING, GroupLayout.PREFERRED_SIZE, GroupLayout.DEFAULT_SIZE, GroupLayout.PREFERRED_SIZE)
@@ -2519,8 +2567,8 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	            	.addComponent(signalQuality[5], 18,18,18)
 	            	.addComponent(signalQuality[6], 18,18,18)
 	            	.addComponent(signalQuality[7], 18,18,18)
-	            	.addComponent(recordCountLabel, 18,18,18)
-	            	.addComponent(recordPointerLabel, 18,18,18)
+	            	.addComponent(signalQuality[8], 18,18,18)
+	            	.addComponent(signalQuality[9], 18,18,18)
 	                .addComponent(markerID, 18,18,18)
 	                .addComponent(aprsStatus, 18,18,18)
 	                .addComponent(aprsTxData, 18,18,18)
@@ -2532,13 +2580,15 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	            .addGroup(layout.createParallelGroup(GroupLayout.Alignment.TRAILING)
 	                .addComponent(logFileNameLabel, 18,18,18)
 	                .addComponent(measurementPeriod, 18,18,18)
-	                .addComponent(measurementsThisGrid, 18,18,18)
-	                .addComponent(tileCount, 18,18,18)
+	                .addComponent(measurementsThisTile, 18,18,18)
+	                .addComponent(minMeasurementsPerTile, 18,18,18)
+	                .addComponent(maxMeasurementsPerTile, 18,18,18)
+	                .addComponent(tilesCompleted, 18,18,18)
+	                .addComponent(totalTiles, 18,18,18)
 	                .addComponent(averageRssiInCurrentTile, 18,18,18)
 	                .addComponent(averageBerInCurrentTile, 18,18,18)
 	                .addComponent(averageSinadInCurrentTile, 18,18,18)
-	                .addComponent(radioRxDataWord, 18,18,18)
-	                .addComponent(radioTxDataWord, 18,18,18)
+	                .addComponent(recordCountLabel, 18,18,18)
 	                .addComponent(radioStatus, 18,18,18)
 	                .addComponent(radioTxData, 18,18,18)
 	                .addComponent(radioRxData, 18,18,18)
@@ -2569,7 +2619,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
         setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         pack();
         setLocation((screenSize.width / 2) - (getWidth() / 2), (screenSize.height / 2) - (getHeight() / 2));
-        setTitle("SignalTrack Arc Fault Analysis System");
+        setTitle("SignalTrack Radio Network Coverage Analysis System"); 
         if (radioComponent.isStartRadioWithSystem()) startRadio();
         setVisible(true);
         mapPanel.add((Component) map, BorderLayout.CENTER);
@@ -2601,18 +2651,24 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	   	map.showArcIntersectPoints(staticTestSettings.isShowIntersectPoints());
    	}
    
-   	private void coverageTestSettingsPropertyChangeEvent(final PropertyChangeEvent event) {
+   	private void updateCoverageTestSettings(final PropertyChangeEvent event) {
    		try {
-   			map.deleteAllPolygons();
-	    	tileSizeArcSeconds = coverageTestSettings.getTileSizeArcSeconds(currentLonLat.y);
-        	map.setGridSize(tileSizeArcSeconds);
-        	map.setGridReference(coverageTestSettings.getGridReference());
-            indexPointer = 0;
-            tileIndex.subList(0, tileIndex.size()).clear();	    
+   			map.deleteAllTestTiles();
+	    	Point.Double tileSizeArcSeconds = coverageTestSettings.
+	    		getTileSizeArcSeconds(serialGPSComponent.getGPSInterface().getPosition().y);
+        	map.setTileSize(tileSizeArcSeconds);
+        	map.setGridSize(coverageTestSettings.getGridSize());
+        	map.setGridReference(coverageTestSettings.getGridReference()); 
 	        map.setSignalMarkerRadius(coverageTestSettings.getSignalMarkerRadius());
-	        map.showPolygons(coverageTestSettings.isShowGridSquareShading());
-	        radioComponent.getRadioInterface().sampleBERValues(coverageTestSettings.isBERSamplingInEffect());
-	        radioComponent.getRadioInterface().sampleRSSIValues(coverageTestSettings.isRSSIMode());
+	        map.showTestTiles(coverageTestSettings.isShowGridSquareShading());
+	   		map.showLines(coverageTestSettings.isShowLines());
+	   		map.showRings(coverageTestSettings.isShowRings());
+	   		map.showQuads(coverageTestSettings.isShowQuads());
+	   		map.showSignalMarkers(coverageTestSettings.isShowSignalMarkers());
+	   		map.setSignalMarkerRadius(coverageTestSettings.getSignalMarkerRadius());
+	        radioComponent.getRadioInterface().sampleBerValues(coverageTestSettings.isBERSamplingInEffect());
+	        radioComponent.getRadioInterface().sampleRssiValues(coverageTestSettings.isRSSIMode());
+	        radioComponent.getRadioInterface().setSinadEnabled(coverageTestSettings.isSinadSamplingInEffect());
 	        if (coverageTestSettings.getMinSamplesPerTile() == -1) {
 	            periodTimer.setDelay(coverageTestSettings.getMinTimePerTile() * 1000);
 	            periodTimer.setInitialDelay(coverageTestSettings.getMinTimePerTile() * 1000);
@@ -2622,6 +2678,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	        }
 	        testMode = validateTestMode();
 	        setToolTipText(testMode);
+	        populateCurrentTestSettingsFromCoverageTestSettingsDialog();
    		} catch (NullPointerException ex) {
    			ex.printStackTrace();
    		}
@@ -2642,29 +2699,31 @@ public class Main extends JFrame implements JMapViewerEventListener {
         return testMode;
    	}
    	
-    private void aprsComponentChangeListenerEvent(final PropertyChangeEvent event) {
+    private void updateAprsSettings(final PropertyChangeEvent event) {
         map.showIcons(aprsComponent.isEnableAprsTracking());
         map.showIconLabels(aprsComponent.isEnableAprsShowIconLabels());
     }
     
     private void mapPropertyChangedChangeListenerEvent(final PropertyChangeEvent event) {
-        updateMapSettings();
+        updateMapSettings(event);
     }
     
     private void mapTypeChangedChangeListenerEvent(final PropertyChangeEvent event) {
         Point.Double point = map.getCenterLonLat();
         Dimension mapPreferredSize = map.getPreferredSize();
         double zoom = map.getZoom();
-        map.setVisible(false);  
+        map.setVisible(false);
+        map.clearCache();
         mapPanel.removeAll();
         map.removePropertyChangeListener(mapPropertyChangeListener);
         map.removeMouseListener(mapMouseListener);
         map.removeMouseMotionListener(mapMouseMotionListener);
         map.removeKeyListener(mapKeyListener);
+        map.removeJMVListener(jmvEventListener);
         
         switch ((int) event.getNewValue()) {
             case 0:
-                map = new ImageMap(systemPref.getInt("SelectedMapIndex", -1));
+                map = new ImageMap(systemPref.getInt("SelectedMapIndex", -1)); 
                 map.setScale(1.0);
                 break;
             case 1:
@@ -2679,7 +2738,8 @@ public class Main extends JFrame implements JMapViewerEventListener {
         map.addMouseListener(mapMouseListener);
         map.addMouseMotionListener(mapMouseMotionListener);
         map.addKeyListener(mapKeyListener);
-
+        map.addJMVListener(jmvEventListener);
+        
         mapPanel.add((Component) map, BorderLayout.CENTER);
         
         mapPanel.revalidate();
@@ -2687,91 +2747,85 @@ public class Main extends JFrame implements JMapViewerEventListener {
 
         map.restoreCache();
     }
-
-    private void updateMapSettings() {
+    
+    private Precision getRequiredPrecision(Point.Double tileSizeArcSeconds) {
+    	long width = (long) Vincenty.arcSecondsToMeters(tileSizeArcSeconds.x, 90, map.getMapBottomEdgeLatitude());
+    	long height = (long) Vincenty.arcSecondsToMeters(tileSizeArcSeconds.y, 0, map.getMapBottomEdgeLatitude());
+    	long size = Math.max(width, height);
+    	if (size <= 9) return Precision.PRECISION_1_M;
+    	if (size <= 99) return Precision.PRECISION_10_M;
+    	if (size <= 999) return Precision.PRECISION_100_M;
+    	if (size <= 9999) return Precision.PRECISION_1_KM;
+    	if (size <= 99999) return Precision.PRECISION_10_KM;
+    	if (size <= 999999) return Precision.PRECISION_100_KM;
+    	return Precision.PRECISION_1000_KM;
+    }
+    
+    private void updateMapSettings(PropertyChangeEvent event) {
     	map.setGridColor(mapSettings.getGridColor());
-		map.setGridSize(tileSizeArcSeconds);
-		map.showGrid(mapSettings.isShowGrid());
-		map.showIcons(aprsComponent.isEnableAprsTracking());
-		map.showIconLabels(aprsComponent.isEnableAprsShowIconLabels());
-		map.showLines(coverageTestSettings.isShowLines());
-		map.showRings(coverageTestSettings.isShowRings());
-		map.showQuads(coverageTestSettings.isShowQuads());
-		map.showSignalMarkers(showSignalMarkers);
-		map.showPolygons(coverageTestSettings.isShowGridSquareShading());
-		map.setSignalMarkerRadius(coverageTestSettings.getSignalMarkerRadius());
-		map.setGridReference(coverageTestSettings.getGridReference());
-		map.setGpsDotRadius(serialGPSComponent.getGpsSymbolRadius());
+    	map.showGrid(mapSettings.isShowGrid());
+    	map.displayShapes(mapSettings.isDisplayShapes());
+    }
+    
+    private void setShutdownMonitorProgress(String note, int progress) {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	shutdownMonitor.setNote(note);
+            	shutdownMonitor.setProgress(progress);
+            }
+        });
     }
     
     private void frameClosingWindowEvent(WindowEvent event) {
-    	ProgressMonitor monitor = new ProgressMonitor(this, "", "Closing Application", 0, 18);
-        monitor.setMillisToPopup(0);
     	try {
-        	monitor.setNote("Saving Map Location");
-        	monitor.setProgress(1);
+        	setShutdownMonitorProgress("Saving Map Location", 1); 
             Point.Double point = map.getCenterLonLat();
-            if (point != null && point.x >= -180 && point.x <= 180) systemPref.putDouble("MapLongitude", point.x);
-            if (point != null && point.y >= -90 && point.y <= 90) systemPref.putDouble("MapLatitude", point.y);
-            systemPref.putDouble("MapScale", map.getScale());
-            systemPref.putInt("MapZoom", map.getZoom());
-            monitor.setNote("Closing GPS Receiver");
-            monitor.setProgress(2);
+            if (point != null && point.x >= -180 && point.x <= 180) systemPref.putDouble("MapLongitude", point.x); 
+            if (point != null && point.y >= -90 && point.y <= 90) systemPref.putDouble("MapLatitude", point.y); 
+            systemPref.putDouble("MapScale", map.getScale()); 
+            systemPref.putInt("MapZoom", map.getZoom()); 
+            setShutdownMonitorProgress("Closing GPS Receiver", 2); 
             serialGPSComponent.getSerialConfig().getSerialInterface().closeSerialPort();
-            monitor.setNote("Closing Radio Port");
-            monitor.setProgress(3);
+            setShutdownMonitorProgress("Closing Radio Port", 3); 
             radioComponent.getSerialConfig().getSerialInterface().closeSerialPort();
-            monitor.setNote("Closing APRS Modem");
-            monitor.setProgress(4);
+            setShutdownMonitorProgress("Closing APRS Modem", 4); 
             aprsComponent.getSerialConfig().getSerialInterface().closeSerialPort();
-            monitor.setNote("Cancelling Static Measurements");
-            monitor.setProgress(5);
+            setShutdownMonitorProgress("Cancelling Static Measurements", 5); 
             if (intersectListUpdate != null) intersectListUpdate.cancel(true);
-            monitor.setNote("Cancelling Doppler Triangulations");
-            monitor.setProgress(6);
+            setShutdownMonitorProgress("Cancelling Doppler Triangulations", 6); 
             if (triangulate != null) triangulate.cancel(true);
-            monitor.setNote("Stopping Network Interface");
-            monitor.setProgress(7);
+            setShutdownMonitorProgress("Stopping Network Interface", 7); 
             nicCheck.cancel();
-            monitor.setNote("Releasing Radio Interface Resources");
-            monitor.setProgress(8);
+            setShutdownMonitorProgress("Releasing Radio Interface Resources", 8); 
             radioComponent.getRadioInterface().dispose();
-            monitor.setNote("Releasing GPS Interface Settings");
-            monitor.setProgress(9);
+            setShutdownMonitorProgress("Releasing GPS Interface Settings", 9); 
             serialGPSComponent.dispose();
-            monitor.setNote("Releasing Radio Resources");
-            monitor.setProgress(10);
+            setShutdownMonitorProgress("Releasing Radio Resources", 10); 
             radioComponent.dispose();
-            monitor.setNote("Releasing APRS Resources");
-            monitor.setProgress(11);
+            setShutdownMonitorProgress("Releasing APRS Resources", 11); 
             aprsComponent.dispose();
-            monitor.setNote("Releasing Map Resources");
-            monitor.setProgress(12);
+            setShutdownMonitorProgress("Releasing Map Resources", 12); 
             mapSettings.dispose();
-            monitor.setNote("Releasing Drive Test Resources");
-            monitor.setProgress(13);
+            setShutdownMonitorProgress("Releasing Coverage Test Resources", 13); 
             coverageTestSettings.dispose();
-            monitor.setNote("Releasing Static Test Resources"); 
-            monitor.setProgress(14);
+            setShutdownMonitorProgress("Releasing Static Test Resources", 14); 
             staticTestSettings.dispose();
-            monitor.setNote("Suspending Clock");
-            monitor.setProgress(15);
+            setShutdownMonitorProgress("Suspending Clock", 15); 
             networkTime.stopClock();
-            monitor.setNote("Suspending Network Time Updates");
-            monitor.setProgress(16);
+            setShutdownMonitorProgress("Suspending Network Time Updates", 16); 
             networkTime.stopAutomaticNetworkTimeUpdates();
-            monitor.setNote("Saving Survey Records");
-            monitor.setProgress(17);
-            if (dataBase != null) dataBase.close();
-            monitor.setNote("Closing Database");
-            monitor.setProgress(18);
+            setShutdownMonitorProgress("Saving Survey Records", 17); 
+            if (database != null) database.close();
+            setShutdownMonitorProgress("Closing Database", 18); 
             fh.flush();
             fh.close();
+            setShutdownMonitorProgress("Shutdown", 19); 
         } catch (Exception ex) {
         	ex.printStackTrace();
-            log.log(Level.SEVERE, "Exception", ex);
+            log.log(Level.SEVERE, "Exception", ex); 
         } finally {
-        	monitor.close();
+        	shutdownMonitor.close();
         	signalReadyToExit(WINDOW_CLOSING_COMPLETE);
         }
     }
@@ -2817,34 +2871,44 @@ public class Main extends JFrame implements JMapViewerEventListener {
     }
     
     private void resetGPSIndicators() {
-    	nmeaSentenceStringLabel.setText("");
-		latitude.setText("");
-		longitude.setText("");
-		currentMGRS.setText("");
-		currentGridSquare.setText("");
-		speedMadeGood.setText("");
-		gpsStatus.setBackground(getGpsStatusBackgroundColor(FixQuality.OFF_LINE));
-		gpsStatus.setText("OFF LINE");
-        gpsCTS.setBackground(new Color(127, 0, 0));
-        gpsDSR.setBackground(new Color(127, 0, 0));
-        gpsCD.setBackground(new Color(127, 0, 0));
-        gpsTxData.setBackground(new Color(127, 0, 0));
-        gpsRxData.setBackground(new Color(127, 0, 0));
-		setUTCLabelColors(networkTime.getTimeStratum());
-		gpsButton.setSelected(false);
-		map.showGpsSymbol(false);
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	nmeaSentenceStringLabel.setText(""); 
+				latitude.setText(""); 
+				longitude.setText(""); 
+				currentMGRS.setText(""); 
+				currentGridSquare.setText(""); 
+				speedMadeGood.setText(""); 
+				gpsStatus.setBackground(getGpsStatusBackgroundColor(FixQuality.OFF_LINE));
+				gpsStatus.setText("OFF LINE"); 
+		        gpsCTS.setBackground(new Color(127, 0, 0));
+		        gpsDSR.setBackground(new Color(127, 0, 0));
+		        gpsCD.setBackground(new Color(127, 0, 0));
+		        gpsTxData.setBackground(new Color(127, 0, 0));
+		        gpsRxData.setBackground(new Color(127, 0, 0));
+				setUTCLabelColors(networkTime.getTimeStratum());
+				gpsButton.setSelected(false);
+				map.showGpsSymbol(false);
+            }
+        });
     }
     
     private void startGps() {
     	try {
     		serialGPSComponent.enableGPS(true);
-        	latitude.setForeground(Color.LIGHT_GRAY);
-        	longitude.setForeground(Color.LIGHT_GRAY);
-        	currentMGRS.setForeground(Color.LIGHT_GRAY);
-        	currentGridSquare.setForeground(Color.LIGHT_GRAY);
-        	speedMadeGood.setForeground(Color.LIGHT_GRAY);
-        	map.showGpsSymbol(false);
-    		gpsButton.setSelected(true);
+    		invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+                @Override
+                public void run() {
+                	latitude.setForeground(Color.LIGHT_GRAY);
+		        	longitude.setForeground(Color.LIGHT_GRAY);
+		        	currentMGRS.setForeground(Color.LIGHT_GRAY);
+		        	currentGridSquare.setForeground(Color.LIGHT_GRAY);
+		        	speedMadeGood.setForeground(Color.LIGHT_GRAY);
+		        	map.showGpsSymbol(false);
+		        	gpsButton.setSelected(true);
+                }
+            });
     	} catch (SerialPortException ex) {
     		resetGPSIndicators();
     		reportException(ex);
@@ -2853,147 +2917,136 @@ public class Main extends JFrame implements JMapViewerEventListener {
 
     private void centerMapOnGpsPosition() {
     	if (serialGPSComponent.getGPSInterface().isValidFix()) {
-    		currentLonLat = serialGPSComponent.getGPSInterface().getPosition();
     		mapDragged = false;
-    		map.setCenterLonLat(currentLonLat);
+    		map.setCenterLonLat(serialGPSComponent.getGPSInterface().getPosition());
+    		map.setDisplayToFitMapElements(true, true, true, true);
     	}
     }
     
 	private void reportException(final ClassNotFoundException ex) {
-    	log.log(Level.WARNING, "ClassNotFoundException", ex);
-        SwingUtilities.invokeLater(new Runnable() {
+    	log.log(Level.WARNING, "ClassNotFoundException", ex); 
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                	ex.getMessage(), "Class Not Found Exception", JOptionPane.ERROR_MESSAGE);
+                	ex.getMessage(), "Class Not Found Exception", JOptionPane.ERROR_MESSAGE); 
             }
         });
 	}
 	
 	private void reportException(final InstantiationException ex) {
-    	log.log(Level.WARNING, "InstantiationException", ex);
-        SwingUtilities.invokeLater(new Runnable() {
+    	log.log(Level.WARNING, "InstantiationException", ex); 
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                	ex.getMessage(), "Instantiation Exception", JOptionPane.ERROR_MESSAGE);
+                	ex.getMessage(), "Instantiation Exception", JOptionPane.ERROR_MESSAGE); 
             }
         });
 	}
 	
 	private void reportException(final ParseException ex) {
-    	log.log(Level.WARNING, "ParseException", ex);
-        SwingUtilities.invokeLater(new Runnable() {
+    	log.log(Level.WARNING, "ParseException", ex); 
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                	ex.getMessage(), "Parse Exception", JOptionPane.ERROR_MESSAGE);
+                	ex.getMessage(), "Parse Exception", JOptionPane.ERROR_MESSAGE); 
             }
         });
 	}
 	
 	private void reportException(final IOException ex) {
-    	log.log(Level.WARNING, "IOException", ex);
-        SwingUtilities.invokeLater(new Runnable() {
+    	log.log(Level.WARNING, "IOException", ex); 
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                	ex.getMessage(), "Input / Output Exception", JOptionPane.ERROR_MESSAGE);
+                	ex.getMessage(), "Input / Output Exception", JOptionPane.ERROR_MESSAGE); 
             }
         });
 	}
 	
 	private void reportException(final IllegalAccessException ex) {
-    	log.log(Level.WARNING, "IllegalAccessException", ex);
-        SwingUtilities.invokeLater(new Runnable() {
+    	log.log(Level.WARNING, "IllegalAccessException", ex); 
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                	ex.getMessage(), "Illegal Access Exception", JOptionPane.ERROR_MESSAGE);
+                	ex.getMessage(), "Illegal Access Exception", JOptionPane.ERROR_MESSAGE); 
             }
         });
 	}
 	
     private void reportException(final UnsupportedLookAndFeelException ex) {
-    	log.log(Level.WARNING, "UnsupportedLookAndFeelException", ex);
-        SwingUtilities.invokeLater(new Runnable() {
+    	log.log(Level.WARNING, "UnsupportedLookAndFeelException", ex); 
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                	ex.getMessage(), "Unsupported Look And Feel Exception", JOptionPane.ERROR_MESSAGE);
+                	ex.getMessage(), "Unsupported Look And Feel Exception", JOptionPane.ERROR_MESSAGE); 
             }
         });
 	}
     
     private void reportException(final SerialPortException ex) {
-    	log.log(Level.WARNING, "SerialPortException", ex);
-        SwingUtilities.invokeLater(new Runnable() {
+    	log.log(Level.WARNING, "SerialPortException", ex); 
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                	ex.getMessage(), "Serial Port Exception", JOptionPane.ERROR_MESSAGE);
+                	ex.getMessage(), "Serial Port Exception", JOptionPane.ERROR_MESSAGE); 
             }
         });
 	}
     
     private void reportException(final InterruptedException ex) {
-    	log.log(Level.WARNING, "InterruptedException", ex);
-        SwingUtilities.invokeLater(new Runnable() {
+    	log.log(Level.WARNING, "InterruptedException", ex); 
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                	ex.getMessage(), "Interrupted Exception", JOptionPane.ERROR_MESSAGE);
+                	ex.getMessage(), "Interrupted Exception", JOptionPane.ERROR_MESSAGE); 
             }
         });
 	}
     
     private void reportException(final ExecutionException ex) {
-    	log.log(Level.WARNING, "ExecutionException", ex);
-        SwingUtilities.invokeLater(new Runnable() {
+    	log.log(Level.WARNING, "ExecutionException", ex); 
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                	ex.getMessage(), "Execution Exception", JOptionPane.ERROR_MESSAGE);
+                	ex.getMessage(), "Execution Exception", JOptionPane.ERROR_MESSAGE); 
             }
         });
 	}
     
     private void reportException(final SecurityException ex) {
-    	log.log(Level.WARNING, "SecurityException", ex);
-        SwingUtilities.invokeLater(new Runnable() {
+    	log.log(Level.WARNING, "SecurityException", ex); 
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                	ex.getMessage(), "Security Exception", JOptionPane.ERROR_MESSAGE);
+                	ex.getMessage(), "Security Exception", JOptionPane.ERROR_MESSAGE); 
             }
         });
 	}
-    
-    private void reportException(final IllegalArgumentException ex) {
-    	log.log(Level.WARNING, "IllegalArgumentException", ex);
-        SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-                JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                	ex.getMessage(), "Illegal Argument Exception", JOptionPane.ERROR_MESSAGE);
-            }
-        });
-	}
-    
+
     private void reportException(final BackingStoreException ex) {
-    	log.log(Level.WARNING, "BackingStoreException", ex);
-        SwingUtilities.invokeLater(new Runnable() {
+    	log.log(Level.WARNING, "BackingStoreException", ex); 
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                	ex.getMessage(), "Backing Store Exception", JOptionPane.ERROR_MESSAGE);
+                	ex.getMessage(), "Backing Store Exception", JOptionPane.ERROR_MESSAGE); 
             }
         });
 	}
     
     private void deviceNotOnlineException(final String[] str) {
-    	log.log(Level.WARNING, "DeviceNotOnlineException", str[0] + " " + str[1]);
-        SwingUtilities.invokeLater(new Runnable() {
+    	log.log(Level.WARNING, "DeviceNotOnlineException", str[0] + " " + str[1]); 
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
@@ -3005,22 +3058,32 @@ public class Main extends JFrame implements JMapViewerEventListener {
     private void resetAPRSIndicators() {
     	aprsRxDataTimer.stop();
         aprsTxDataTimer.stop();
-        aprsCTS.setBackground(new Color(127, 0, 0));
-        aprsDSR.setBackground(new Color(127, 0, 0));
-        aprsCD.setBackground(new Color(127, 0, 0));
-        aprsTxData.setBackground(new Color(127, 0, 0));
-        aprsRxData.setBackground(new Color(127, 0, 0));
-        aprsStatus.setBackground(new Color(127, 0, 0));
-        aprsStatus.setText("OFF LINE");
-        aprsButton.setSelected(false);
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+				aprsCTS.setBackground(new Color(127, 0, 0));
+		        aprsDSR.setBackground(new Color(127, 0, 0));
+		        aprsCD.setBackground(new Color(127, 0, 0));
+		        aprsTxData.setBackground(new Color(127, 0, 0));
+		        aprsRxData.setBackground(new Color(127, 0, 0));
+		        aprsStatus.setBackground(new Color(127, 0, 0));
+		        aprsStatus.setText("OFF LINE"); 
+		        aprsButton.setSelected(false);
+            }
+        });
     }
     
     private void startAPRS() {
         try {
         	aprsComponent.getSerialConfig().getSerialInterface().setOnline(aprsComponent.getSerialConfig().getPortName());
-            aprsStatus.setText("ON LINE");
-            aprsStatus.setBackground(Color.GREEN);
-            aprsButton.setSelected(true);
+        	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+	            @Override
+	            public void run() {
+					aprsStatus.setText("ON LINE"); 
+					aprsStatus.setBackground(Color.GREEN);
+					aprsButton.setSelected(true);
+	            }
+	        });
         } catch(SerialPortException ex) {
         	resetAPRSIndicators();
             reportException(ex);
@@ -3037,43 +3100,82 @@ public class Main extends JFrame implements JMapViewerEventListener {
     }
 
     private void startCoverageTest() {
-    	if (!radioComponent.isRadioOnLine()) startRadio();
-    	if (dataMode == DataMode.CLOSED) createNewDataFile();
-    	if (!serialGPSComponent.isGpsOnLine()) startGps();
-        isCoverageTestModeActive = true;
-        coverageTestSettings.setControlsEnabled(false);
-        periodTimerTimeOut = false;
-        periodTimerHalt = false;
-        periodTimer.start();
+    	if (dataMode != DataMode.RECORD && dataMode != DataMode.CLOSED) {
+    		setDataMode(DataMode.RECORD);
+    	}
+    	if (dataMode == DataMode.CLOSED) {
+    		 invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+	            @Override
+	            public void run() {
+	            	JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
+		                "Please select a coverage test", "File Not Open Error", JOptionPane.ERROR_MESSAGE); 
+	            }
+	        });
+    		int returnVal = openDataFile();
+    		if (returnVal == JFileChooser.CANCEL_OPTION) {
+    			stopCoverageTest();
+    			return;
+    		}
+    	}
+    	startRadio();
+    	startGps();
+    	serialGPSComponent.getGPSInterface().enableContinuousUpdate(true);
+    	coverageTestActive = true;
 	}
 
     private void stopCoverageTest() {
+    	coverageTestActive = false;
         coverageTestSettings.setControlsEnabled(true);
-        isCoverageTestModeActive = false;
+        serialGPSComponent.getGPSInterface().enableContinuousUpdate(false);
         measurementTimer.stop();
-		setDataMode(DataMode.CLOSED);
-    }
-    
-    private void startArcTest() {
-    }
-    
-    private void stopArcTest() {
+		setDataMode(DataMode.STOP);
     }
     
     private void startStaticTest() {
-    	isStaticModeActive = true;
+    	if (dataMode == DataMode.CLOSED) createNewDataFile(null);
+    	if (!serialGPSComponent.isGpsOnLine()) startGps();
+        staticTestActive = true;
     }
     
     private void stopStaticTest() {
-    	isStaticModeActive = false;
+        staticTestActive = false;
+		setDataMode(DataMode.CLOSED);
+    }
+
+    private void startLearnMode() {
+    	if (dataMode != DataMode.RECORD && dataMode != DataMode.CLOSED) {
+    		setDataMode(DataMode.RECORD);
+    	}
+    	if (dataMode == DataMode.CLOSED) {
+    		 invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+    	            @Override
+    	            public void run() {
+    	            	JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
+    		                "Please select an existing coverage test, or create a new test", "File Not Open Error", JOptionPane.ERROR_MESSAGE); 
+    	            }
+    	        });
+    		if (openDataFile() == JFileChooser.CANCEL_OPTION) {
+    			stopLearnMode();
+    			return;
+    		}
+    	}
+    	setDataMode(DataMode.RECORD);
+    	learnMode = true;
+    }
+    
+    private void stopLearnMode() {
+    	learnMode = false;
+    	learnModeButton.setSelected(false);
     }
     
     private void startRadio() {
         try {  	
         	radioButton.setSelected(true);
 			radioComponent.startRadio();
-			radioComponent.getRadioInterface().sampleBERValues(coverageTestSettings.isBERSamplingInEffect());
-	        radioComponent.getRadioInterface().sampleRSSIValues(coverageTestSettings.isRSSIMode());
+			radioComponent.getRadioInterface().sampleBerValues(coverageTestSettings.isBERSamplingInEffect());
+	        radioComponent.getRadioInterface().sampleRssiValues(coverageTestSettings.isRSSIMode());
+	        testMode = validateTestMode();
+	        setToolTipText(testMode);
         } catch (SerialPortException ex) {
 			resetRadioIndicators();
 			reportException(ex);
@@ -3081,16 +3183,25 @@ public class Main extends JFrame implements JMapViewerEventListener {
     }  
     
     private void resetRadioIndicators() {
-    	radioStatus.setBackground(new Color(127,0,0));
-        radioStatus.setText("OFF LINE");
-        radioCTS.setBackground(new Color(127, 0, 0));
-        radioDSR.setBackground(new Color(127, 0, 0));
-        radioCD.setBackground(new Color(127, 0, 0));
-        radioTxData.setBackground(new Color(127, 0, 0));
-        radioRxData.setBackground(new Color(127, 0, 0));
-        radioTxDataWord.setText("");
-		radioRxDataWord.setText("");
-		radioButton.setSelected(false);
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+				radioStatus.setBackground(new Color(127,0,0));
+		        radioStatus.setText("OFF LINE"); 
+		        radioCTS.setBackground(new Color(127, 0, 0));
+		        radioDSR.setBackground(new Color(127, 0, 0));
+		        radioCD.setBackground(new Color(127, 0, 0));
+		        radioTxData.setBackground(new Color(127, 0, 0));
+		        radioRxData.setBackground(new Color(127, 0, 0));
+				radioButton.setSelected(false);
+				testMode = TestMode.OFF;
+				signalMeterArray.setMeterLevels(0);
+				setSignalQualityDisplay(testMode, false);
+				averageBerInCurrentTile.setText(""); 
+				averageSinadInCurrentTile.setText(""); 
+				averageRssiInCurrentTile.setText(""); 
+            }
+        });
     }
     
     private void stopRadio() {
@@ -3114,7 +3225,6 @@ public class Main extends JFrame implements JMapViewerEventListener {
 	            	sinadChangedChangeListenerEvent(event);
 	    		}
 			}
-            
         });
         sinad.startSinad();
     }
@@ -3132,12 +3242,17 @@ public class Main extends JFrame implements JMapViewerEventListener {
     }
 
     private void printMenuItemActionListenerEvent(ActionEvent event) {
-    	SwingUtilities.invokeLater(new PrintUtilities(map.getScreenShot()));
+    	invokeLaterInDispatchThreadIfNeeded(new PrintUtilities(map.getScreenShot()));
     }
 
     private void mapPanelSpaceKeyPressed(KeyEvent event) {
         markerCounter++;
-		markerID.setText(markerFormat.format(markerCounter));
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	markerID.setText(String.format("%5d", markerCounter)); 
+            }
+        });
     }
 
     private void mapPanelEnterKeyPressed(KeyEvent event) {
@@ -3182,70 +3297,61 @@ public class Main extends JFrame implements JMapViewerEventListener {
 		return d;
     }
 
-    private void mapPanelRightMouseButtonClicked(final MouseEvent event) {
-        cursorBearingSet = false;
-        cursorBearing = 0;
-        cursorBearingPosition = map.getMouseCoordinates();
-        cursorBearingIndex = addRdfBearing(cursorBearingPosition, 0, RDF_BEARING_LENGTH_IN_DEGREES, 
-        	GPSInterface.RdfQuality.RDF_QUAL_8, Color.RED);
-        map.addRing(cursorBearingPosition, 6, Color.RED);
+    void mapPanelRightMouseButtonClicked(final MouseEvent event) {
+        if (testMode == TestMode.DOPPLER) {
+	    	cursorBearingSet = false;
+	        cursorBearing = 0;
+	        cursorBearingPosition = map.getMouseCoordinates();
+	        cursorBearingIndex = addRdfBearing(cursorBearingPosition, 0, RDF_BEARING_LENGTH_IN_DEGREES, 
+	        	GPSInterface.RdfQuality.RDF_QUAL_8, Color.RED);
+	        map.addRing(cursorBearingPosition, 6, Color.RED);
+        }
     }
 
-    private void mapPanelDragged(final MouseEvent event) {
+    void mapPanelDragged(final MouseEvent event) {
     	mapDragged = true;
     }
     
-    private void mapPanelMouseMoved(final Point.Double mousePosition) {
+    void mapPanelMouseMoved(final Point.Double cursorLonLat, final Point.Double tileSizeArcSeconds,
+    		final Point.Double gridReference, final Point.Double gridSize) {
     	if (!mouseOffGlobe) {
-	        updateTestTileLabel(mousePosition, tileSizeArcSeconds);
-	        updateMGRSLabel(mousePosition);
-	        cursorLatitude.setText(latFormat.format(mousePosition.y));
-	        cursorLongitude.setText(lonFormat.format(mousePosition.x));
+	        updateTestTileLabel(cursorLonLat, tileSizeArcSeconds, gridReference, gridSize);
+	        updateMGRSLabel(cursorLonLat);
+	        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+	            @Override
+	            public void run() {
+					cursorLatitude.setText(String.format("%8f", cursorLonLat.y)); 
+					cursorLongitude.setText(String.format("%9f", cursorLonLat.x)); 
+	            }
+	        });
     	} else {
     		setMouseOffGlobe();
-    	}
+    	}   	
     }
 
-    private void updateTestTileLabel(final Point.Double mousePosition, final Point.Double tileSizeArcSeconds) {
-    	SwingWorker<UTMTestTile, Void> worker = new SwingWorker<UTMTestTile, Void>() {
-            @Override
-            protected UTMTestTile doInBackground() throws Exception {
-            	return CoordinateUtils.latLonToTestTile(mousePosition, tileSizeArcSeconds);
-            }
-            @Override
-            protected void done() {
-				try {
-					if (!mouseOffGlobe) {
-						UTMTestTile tile = get();
-						cursorTestTileReference.setText(tile.toString());
-					} else {
-						setMouseOffGlobe();
-					}
-				} catch(InterruptedException ex) {
-					reportException(ex);
-				} catch(ExecutionException ex) {
-					reportException(ex);
-				} catch (IllegalArgumentException ex) {
-					reportException(ex);
-				} catch (NullPointerException ex) {
-					setMouseOffGlobe();
-				}
-            }
-    	};
-    	worker.execute();
+    private void updateTestTileLabel(final Point.Double position, final Point.Double tileSizeArcSeconds, 
+    	final Point.Double gridReference, final Point.Double gridSize) {
+    	TestTile testTile = CoordinateUtils.lonLatToTestTile(position, tileSizeArcSeconds, gridReference, gridSize);
+    	if (testTile != null) {
+    		invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+	            @Override
+	            public void run() {
+					cursorTestTileReference.setText(testTile.toFormattedTestTileDesignator());
+	            }
+	        });
+    	}
     }
     
     private void updateMGRSLabel(final Point.Double mousePosition) {
     	SwingWorker<MGRSCoord, Void> worker = new SwingWorker<MGRSCoord, Void>() {
             @Override
             protected MGRSCoord doInBackground() throws Exception {
-            	return CoordinateUtils.latLonToMGRS(mousePosition, 5);
+            	return CoordinateUtils.lonLatToMGRS(mousePosition, 5);
             }
             @Override
             protected void done() {
 				try {
-					MGRSCoord mgrs = get();
-					if (!mouseOffGlobe) cursorMGRS.setText(mgrs.toString());
+					if (!mouseOffGlobe) cursorMGRS.setText(get().toString());
 				} catch(InterruptedException ex) {
 					reportException(ex);
 				} catch(ExecutionException ex) {
@@ -3264,19 +3370,11 @@ public class Main extends JFrame implements JMapViewerEventListener {
     }
 
     private void gpsValidFixPropertyChangeListenerEvent(final PropertyChangeEvent event) {
-    	Point.Double currentLonLat = serialGPSComponent.getGPSInterface().getPosition();
-    	if (currentLonLat != null) {
-    		this.currentLonLat = currentLonLat;
-    		processPositionInformation(PositionSource.GPS, currentLonLat);
-    	}
+
     }
     
     private void gpsValidPositionPropertyChangeListenerEvent(final PropertyChangeEvent event) {
-    	Point.Double currentLonLat = serialGPSComponent.getGPSInterface().getPosition();
-    	if (currentLonLat != null) {
-    		this.currentLonLat = currentLonLat;
-    		processPositionInformation(PositionSource.GPS, currentLonLat);
-    	}
+    	processPositionInformation(PositionSource.GPS, (Point.Double) event.getNewValue());
     }
 
     private void gpsValidTimePropertyChangeListenerEvent(final PropertyChangeEvent event) {
@@ -3288,41 +3386,17 @@ public class Main extends JFrame implements JMapViewerEventListener {
     }
     
     private void processPositionInformation(PositionSource source, Point.Double currentLonLat) {
-    	if (currentLonLat == null) return;
-    	this.currentLonLat = currentLonLat;
-    	
-    	coverageTestSettings.setDegreesLatitude(currentLonLat.y);
-    	
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	ppi(source, currentLonLat);
+            }
+    	});
+    }
+    
+    private void ppi(final PositionSource source, final Point.Double currentLonLat) {
     	lastInputSource = source;
-
-        utmTestTile = CoordinateUtils.latLonToTestTile(currentLonLat, tileSizeArcSeconds);
-        
-        testTileLonLat = CoordinateUtils.latLonToInsideCornerOfTile(currentLonLat, tileSizeArcSeconds);
-        
-    	tileDimensionInMeters = new Point.Double(
-        	Vincenty.distanceToOnSurface(testTileLonLat, new Point.Double(testTileLonLat.x + (tileSizeArcSeconds.x / 3600.0),
-        		testTileLonLat.y)), 
-            Vincenty.distanceToOnSurface(testTileLonLat, new Point.Double(testTileLonLat.x, testTileLonLat.y + 
-                (tileSizeArcSeconds.y / 3600.0))));
     	
-        double tileDimMinMeters = Math.min(tileDimensionInMeters.x, tileDimensionInMeters.y);
-        
-        switch (coverageTestSettings.getSampleTimingMode()) {
-            case 0:
-                measurementDelay = (int) Math.round(milliSecondsBetweenMeasurements(
-                    tileDimMinMeters, serialGPSComponent.getGPSInterface().getSpeedMadeGoodKPH(),
-                    coverageTestSettings.getDotsPerTile()));
-                break;
-            case 1:
-            	measurementDelay = (int) Math.round(milliSecondsBetweenMeasurements(
-                    tileDimMinMeters, serialGPSComponent.getGPSInterface().getSpeedMadeGoodKPH(),
-                    coverageTestSettings.getMinSamplesPerTile() + 5));
-                break;
-            case 2:
-            	measurementDelay = 200;
-                break;
-        }
-        		
         if (serialGPSComponent.enableGpsTracking() && source != PositionSource.MANUAL) {
             double angle;
             if (serialGPSComponent.getGPSInterface().getSpeedMadeGoodMPH() >= 2) {
@@ -3330,6 +3404,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
             } else {
                 angle = 360;
             }
+            
             map.showGpsSymbol(true);
             map.setGpsSymbol(currentLonLat, serialGPSComponent.getGpsSymbolRadius() * 2, 
             	getGpsColor(serialGPSComponent.getGPSInterface().getFixQuality()), (int) angle);
@@ -3348,55 +3423,65 @@ public class Main extends JFrame implements JMapViewerEventListener {
         } else {
             periodTimer.stop();
         }
+        
+        String mph = String.format("%3.1f", serialGPSComponent.getGPSInterface().getSpeedMadeGoodMPH()) + " MPH"; 
+        String kph = String.format("%3.1f", serialGPSComponent.getGPSInterface().getSpeedMadeGoodKPH()) + " Knots"; 
 
-        longitude.setText(lonFormat.format(currentLonLat.x));
-        latitude.setText(latFormat.format(currentLonLat.y));
-        String mph = speedFormat.format(serialGPSComponent.getGPSInterface().getSpeedMadeGoodMPH()) + " MPH";
-        String kph = speedFormat.format(serialGPSComponent.getGPSInterface().getSpeedMadeGoodKPH()) + " Knots";
-        speedMadeGood.setText(mph + " / " + kph);
-        currentMGRS.setText(serialGPSComponent.getGPSInterface().getMGRSLocation()); 
-        currentGridSquare.setText(utmTestTile.toString());
-        tileCount.setText(measurementsTakenFormat.format(totalGridsCompleted));
+		longitude.setText(String.format("%9f", currentLonLat.x)); 
+		latitude.setText(String.format("%8f", currentLonLat.y)); 
+		speedMadeGood.setText(mph + " / " + kph); 
+		currentMGRS.setText(serialGPSComponent.getGPSInterface().getMGRSLocation());
+		
+		setCurrentGridSquareLabel(currentLonLat);
         
-        if (coverageTestSettings.isRSSIMode()) {
-        	averageRssiInCurrentTile.setText(averageRssiInCurrentTileText);
-        } else {
-        	averageRssiInCurrentTile.setText("");
+        if (currentTestTile != null) {
+	        if (coverageTestSettings.isRSSIMode()) {
+	        	averageRssiInCurrentTile.setText(String.format("%4.1f", currentTestTile.getAvgdBm())); 
+	        } else {
+	        	averageRssiInCurrentTile.setText(""); 
+	        }
+	        
+	        if (coverageTestSettings.isBERSamplingInEffect()) {
+	        	averageBerInCurrentTile.setText(String.format("%1.2f", currentTestTile.getAvgBer())); 
+	        } else {
+	        	averageBerInCurrentTile.setText(""); 
+	        }
+	        
+	        if (coverageTestSettings.isSinadSamplingInEffect()) {
+	        	averageSinadInCurrentTile.setText(String.format("%2.1f", currentTestTile.getAvgSinad())); 
+	        } else {
+	        	averageSinadInCurrentTile.setText(""); 
+	        }
+	        
+	        measurementsThisTile.setText(String.format("%5d", currentTestTile.getMeasurementCount())); 
         }
         
-        if (coverageTestSettings.isBERSamplingInEffect()) {
-        	averageBerInCurrentTile.setText(averageBerInCurrentTileText);
-        } else {
-        	averageBerInCurrentTile.setText("");
-        }
-        
-        if (coverageTestSettings.isSinadSamplingInEffect()) {
-        	averageSinadInCurrentTile.setText(averageSinadInCurrentTileText);
-        }  else {
-        	averageSinadInCurrentTile.setText("");
-        }
-
-        if (source == PositionSource.GPS && isCoverageTestModeActive) {
-            measurementTimer.setDelay(measurementDelay);
-            measurementTimer.setInitialDelay(0);
-            measurementPeriod.setText(measurementPeriodFormat.format(measurementDelay));
-            isRecord = true;
-            measurementTimer.start();
-        } else if (source == PositionSource.MANUAL) {
-            measurementTimer.stop();
-            measurementPeriod.setText("MAN");
-            isRecord = true;
-            processDriveTestMeasurement();
-        } else if (source == PositionSource.ARCHIVE) {
-            measurementTimer.stop();
-            measurementPeriod.setText("ARCHIVE");
-            isRecord = true;
-            processDriveTestMeasurement();
-        }
-        if (doStartTestMode) processDriveTestMeasurement();
+        if(dataMode == DataMode.RECORD) processCoverageTestMeasurement(source, serialGPSComponent.getGPSInterface().getPosition());
     }
     
-    private boolean checkMapRecenter(Point.Double point) {
+    private void setCurrentGridSquareLabel(Point.Double currentLonLat) {
+    	if (coverageTestActive) {
+        	if (isOffCourse(currentLonLat)) {
+	        	currentGridSquare.setText("Off Course"); 
+	        	currentGridSquare.setForeground(Color.RED);
+        	} else {
+        		currentGridSquare.setText(CoordinateUtils.lonLatToTestTile(currentLonLat, 
+                	coverageTestSettings.getTileSizeArcSeconds(currentLonLat.getY()), 
+                	coverageTestSettings.getGridReference(), coverageTestSettings.getGridSize())
+        			.toFormattedTestTileDesignator());
+        		currentGridSquare.setForeground(Color.GREEN);
+        	}
+        } else {	
+        	currentGridSquare.setText(CoordinateUtils.lonLatToTestTile(currentLonLat, 
+        		coverageTestSettings.getTileSizeArcSeconds(currentLonLat.getY()), 
+        		coverageTestSettings.getGridReference(), coverageTestSettings.getGridSize())
+        		.toFormattedTestTileDesignator());
+        	currentGridSquare.setForeground(Color.BLACK);
+        }
+        
+    }
+    
+    private boolean checkMapRecenter(final Point.Double point) {
     	boolean ret = false;
     	double longitudeThreshold = Math.abs((map.getMapLeftEdgeLongitude() - map.getMapRightEdgeLongitude()) / 4);
         double latitudeThreshold = Math.abs((map.getMapTopEdgeLatitude() - map.getMapBottomEdgeLatitude()) / 4);
@@ -3416,155 +3501,219 @@ public class Main extends JFrame implements JMapViewerEventListener {
     }
 
     private void measurementTimerActionListenerEvent(ActionEvent event) {
-        processDriveTestMeasurement();
+    	if(dataMode == DataMode.RECORD) processCoverageTestMeasurement(PositionSource.TIMER, serialGPSComponent.getGPSInterface().getPosition());
     }
 
     private void processStaticMeasurement(StaticMeasurement sm) {
-    	staticList.add(sm);
-    	if (dataMode == DataMode.RECORD) dataBase.appendRecord(sm);
-    	if (doProcessStaticMeasurements) compileStaticMeasurements();
+    	if (dataMode == DataMode.RECORD) database.appendStaticRecord(sm);
+    	if (processStaticMeasurements) compileStaticMeasurements();
+    }
+    
+    private TestTile getCurrentTestTileAt(Point.Double currentLonLat) {
+    	coverageTestSettings.setDegreesLatitude(currentLonLat.y);
+    	
+    	Point.Double tileSizeArcSeconds = coverageTestSettings.getTileSizeArcSeconds(currentLonLat.getY());
+    	Point.Double gridReference = coverageTestSettings.getGridReference();
+    	Point.Double testFieldDimensions = coverageTestSettings.getGridSize();
+    	Precision precision = getRequiredPrecision(tileSizeArcSeconds);
+    	Point.Double testTileLowerLeftLonLat = CoordinateUtils.lonLatToLowerLeftCornerOfTile(currentLonLat, 
+    		tileSizeArcSeconds, gridReference, testFieldDimensions);
+    	
+        return new TestTile(logFileName, testTileLowerLeftLonLat, tileSizeArcSeconds, precision);
+    }
+    
+    private boolean isOffCourse(Point.Double currentLonLat) {
+    	coverageTestSettings.setDegreesLatitude(currentLonLat.y);
+    	
+    	Point.Double tileSizeArcSeconds = coverageTestSettings.getTileSizeArcSeconds(currentLonLat.getY());
+    	Point.Double gridReference = coverageTestSettings.getGridReference();
+    	Point.Double testFieldDimensions = coverageTestSettings.getGridSize();
+    	Precision precision = getRequiredPrecision(tileSizeArcSeconds);
+    	Point.Double testTileLowerLeftLonLat = CoordinateUtils.lonLatToLowerLeftCornerOfTile(currentLonLat, 
+    		tileSizeArcSeconds, gridReference, testFieldDimensions);
+    	
+    	return !database.isTileCreated(new TestTile(logFileName, testTileLowerLeftLonLat, tileSizeArcSeconds, precision));
+    }
+    
+    private void processCoverageTestMeasurement(PositionSource source, Point.Double currentLonLat) {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+		    	if (database == null) return;
+		    	
+		    	TestTile workingTile = getCurrentTestTileAt(currentLonLat);
+		
+		        if (workingTile != null) {
+		        	
+			        switch (coverageTestSettings.getSampleTimingMode()) { //TODO: come up with improved algorithm
+			            case 0:
+			                measurementDelay = (int) Math.round(milliSecondsBetweenMeasurements(
+			                    workingTile.getTileSize().x, serialGPSComponent.getGPSInterface().getSpeedMadeGoodKPH(),
+			                    coverageTestSettings.getDotsPerTile()));
+			                break;
+			            case 1:
+			            	measurementDelay = (int) Math.round(milliSecondsBetweenMeasurements(
+			            		workingTile.getTileSize().x, serialGPSComponent.getGPSInterface().getSpeedMadeGoodKPH(),
+			                    coverageTestSettings.getMinSamplesPerTile() + 5));
+			                break;
+			            case 2:
+			            	measurementDelay = 200;
+			                break;
+			        }
+			        
+			        averageRssiInCurrentTile.setText(averageRssiInCurrentTileText);
+			        averageBerInCurrentTile.setText(averageBerInCurrentTileText);
+			        averageSinadInCurrentTile.setText(averageSinadInCurrentTileText);
+			        
+			        if (source == PositionSource.GPS && coverageTestActive) {
+			            measurementTimer.setDelay(measurementDelay);
+			            measurementTimer.setInitialDelay(0);
+			            setMeasurementPeriodText(String.format("%4d", measurementDelay)); 
+			            if (!measurementTimer.isRunning()) measurementTimer.start();
+			        } else if (source == PositionSource.MANUAL) {
+			            measurementTimer.stop();
+			            setMeasurementPeriodText("MAN"); 
+			            addSignalMarker(workingTile);
+			        } else if (source == PositionSource.TIMER) {
+			        	addSignalMarker(workingTile);
+			        }
+		        } else {
+		        	currentGridSquare.setText("Off Course"); 
+		        	currentGridSquare.setForeground(Color.RED);
+		        }
+            }
+    	});
     }
 
-    private void processDriveTestMeasurement() {
-        boolean foundExistingTile = false;
-
-        for (int i = 0; i < tileIndex.size(); i++) {
-            if (utmTestTile.getEasting() == tileIndex.get(i).getUTMTestTile().getEasting() && 
-            		utmTestTile.getNorthing() == tileIndex.get(i).getUTMTestTile().getNorthing()) {
-                indexPointer = i;
-                foundExistingTile = true;
-                break;
+    private void setMeasurementPeriodText(String text) {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	measurementPeriod.setText(text);
             }
-        }
-
-        if (foundExistingTile) {
-            tileIndex.get(indexPointer).incrementMeasurementCount();
-        } else {
-            tileIndex.add(new TileIndex(map, utmTestTile, new GeoTile(testTileLonLat, tileSizeArcSeconds), 1));
-            indexPointer = tileIndex.size() - 1;
-            dotsPerTile = 0;
-            tilesTraversed++;
-        }
-
-        if (dotsPerTile < coverageTestSettings.getDotsPerTile()) {
-            if (Math.abs(lastDotLocation.x - currentLonLat.x) > 0.0005
-                    || Math.abs(lastDotLocation.y - currentLonLat.y) > 0.0005) {
-                Color dotColor;
-                switch (coverageTestSettings.getSignalQualityDisplayMode()) {
-                    case 0:
-                        if (dataMode == DataMode.REPLAY) {
-                            dotColor = sinadToColor(logFileSINAD);
-                        } else {
-                            dotColor = sinadToColor(sinad.getSINAD());
-                        }
-                        map.addSignalMarker(currentLonLat, coverageTestSettings.getSignalMarkerRadius(), dotColor);
-                        break;
-                    case 1:
-                        if (dataMode == DataMode.REPLAY) {
-                            dotColor = dBmToColor(logFileRSSI);
-                        } else {
-                            dotColor = dBmToColor(radioComponent.getRadioInterface().getdBm());
-                        }
-                        map.addSignalMarker(currentLonLat, coverageTestSettings.getSignalMarkerRadius(), dotColor);
-                        break;
-                    case 2:
-                        if (dataMode == DataMode.REPLAY) {
-                            dotColor = berToColor(logFileBER);
-                        } else {
-                            dotColor = berToColor(radioComponent.getRadioInterface().getBER());
-                        }
-                        map.addSignalMarker(currentLonLat, coverageTestSettings.getSignalMarkerRadius(), dotColor);
-                        break;
-                }
-                dotsPerTile++;
-                lastDotLocation = currentLonLat;
+		});
+    }
+    
+    private void setMinMeasurementsPerTileText(String text) {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	minMeasurementsPerTile.setText(text);
             }
-        }
-        
-        double si = 0.0;
-        
-        if (sinad != null) si = sinad.getSINAD();
-        
-        if (dataMode == DataMode.REPLAY) {
-            tileIndex.get(indexPointer).addSinad(logFileSINAD);
-            tileIndex.get(indexPointer).addBer(logFileBER);
-            tileIndex.get(indexPointer).addRssi(logFileRSSI);
-        } else {
-            tileIndex.get(indexPointer).addSinad(si);
-            tileIndex.get(indexPointer).addBer(radioComponent.getRadioInterface().getBER());
-            tileIndex.get(indexPointer).addRssi(radioComponent.getRadioInterface().getRSSI());
-        }
-
-        if ((tileIndex.get(indexPointer).getMeasurementCount() >= coverageTestSettings.getMinSamplesPerTile()
-                && coverageTestSettings.getMinSamplesPerTile() != -1)
-                || (periodTimerTimeOut && coverageTestSettings.getMinSamplesPerTile() == -1)) {
-            for (int i = 0; i < tileIndex.get(indexPointer).getMeasurementCount(); i++) {
-            	int rssiAvg = (int) tileIndex.get(indexPointer).getAvgRssi();
-            	int dBmAvg = radioComponent.getCalibrationInterface().getCalibrationDataObject().getdBmElement(rssiAvg);
-                averageRssiInCurrentTileText = dBmFormat.format(dBmAvg) + " dBm";
-                averageBerInCurrentTileText = berFormat.format(tileIndex.get(indexPointer).getAvgBer()) + " %";
-                averageSinadInCurrentTileText = sinadFormat.format(tileIndex.get(indexPointer).getAvgSinad()) + " dB";
+		});
+    }
+    
+    private void setMaxMeasurementsPerTileText(String text) {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	maxMeasurementsPerTile.setText(text);
             }
-        }
+		});
+    }
 
-        if ((tileIndex.get(indexPointer).getMeasurementCount() == coverageTestSettings.getMinSamplesPerTile()
-                && coverageTestSettings.getMinSamplesPerTile() != -1)
-                || (periodTimerTimeOut && coverageTestSettings.getMinSamplesPerTile() == -1)) {
-            tileIndex.get(indexPointer).setColor(indexPointer, Color.GREEN);
-            periodTimer.stop();
-            totalGridsCompleted++;
-            periodTimerTimeOut = false;
-            periodTimerHalt = true;
-            if (coverageTestSettings.isAlertOnMinimumSamplesPerTileAcquired() && dataMode != DataMode.REPLAY
-                    && dataMode != DataMode.STOP) {
-                new AePlayWave(DEFAULT_TILE_COMPLETE_SOUND);
+	private void tileRecordReadyEvent(final PropertyChangeEvent event) {	
+		currentTestTile = (TestTile) event.getNewValue();
+	}
+	
+	private void updateTileDisplay(TestTile testTile) {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+				if ((testTile.getMeasurementCount() > 0 && testTile.getMeasurementCount() < coverageTestSettings.getMinSamplesPerTile() 
+						&& coverageTestSettings.getMinSamplesPerTile() != -1)
+						|| (periodTimerTimeOut && coverageTestSettings.getMinSamplesPerTile() == -1)) {
+		            averageRssiInCurrentTileText = String.format("%3.1f", testTile.getAvgdBm()) + " dBm"; 
+		            averageBerInCurrentTileText = String.format("%1.2f", testTile.getAvgBer()) + " %"; 
+		            averageSinadInCurrentTileText = String.format("%2.1f", testTile.getAvgSinad()) + " dB"; 
+				}
+				if ((testTile.getMeasurementCount() == coverageTestSettings.getMinSamplesPerTile() &&
+		                coverageTestSettings.getMinSamplesPerTile() != -1)
+		                || (periodTimerTimeOut && coverageTestSettings.getMinSamplesPerTile() == -1)) {
+		            periodTimer.stop();
+		            periodTimerTimeOut = false;
+		            periodTimerHalt = true;
+		            if (coverageTestSettings.isAlertOnMinimumSamplesPerTileAcquired() && dataMode != DataMode.STOP) {
+		                playTileCompleteSound();
+		            }
+		        }
             }
-        }
+    	});    
+	}
 
-        if (dataMode == DataMode.RECORD && lastInputSource != PositionSource.ARCHIVE
-                && ((tileIndex.get(indexPointer).getMeasurementCount() <= coverageTestSettings.getMaxSamplesPerTile()
+	private void showSignalMarker(int mode, int channel) {
+        if (Math.abs(lastDotLocation.x - serialGPSComponent.getGPSInterface().getPosition().x) > 0.0005
+                || Math.abs(lastDotLocation.y - serialGPSComponent.getGPSInterface().getPosition().y) > 0.0005) {
+            Color dotColor;
+            switch (mode) {
+                case 0:
+                    dotColor = sinadToColor(radioComponent.getRadioInterface().getSinad(channel));
+                    map.addSignalMarker(serialGPSComponent.getGPSInterface().getPosition(), coverageTestSettings.getSignalMarkerRadius(), dotColor);
+                    break;
+                case 1:
+                    dotColor = dBmToColor(radioComponent.getRadioInterface().getdBm(channel));
+                    map.addSignalMarker(serialGPSComponent.getGPSInterface().getPosition(), coverageTestSettings.getSignalMarkerRadius(), dotColor);
+                    break;
+                case 2:
+                    dotColor = berToColor(radioComponent.getRadioInterface().getBer(channel));
+                    map.addSignalMarker(serialGPSComponent.getGPSInterface().getPosition(), coverageTestSettings.getSignalMarkerRadius(), dotColor);
+                    break;
+            }
+            lastDotLocation = serialGPSComponent.getGPSInterface().getPosition();
+        }
+	}
+	
+	private void addSignalMarker(TestTile testTile) {
+        if (dataMode == DataMode.RECORD && lastInputSource != PositionSource.ARCHIVE 
+                && ((testTile.getMeasurementCount() <= coverageTestSettings.getMaxSamplesPerTile()
                 && coverageTestSettings.getMinSamplesPerTile() != -1)
                 || (!periodTimerHalt && coverageTestSettings.getMinSamplesPerTile() == -1))) {
 
-            DriveTestData data = new DriveTestData();
-            
-            data.ber = radioComponent.getRadioInterface().getBERList();
-            data.freq = radioComponent.getRadioInterface().getScanList();
-            data.rssi = radioComponent.getRadioInterface().getdBmList();
-            data.sinad = sinadArray;
-            
-            if (serialGPSComponent.getGPSInterface().isValidFix()) {
-            	data.millis = serialGPSComponent.getGPSInterface().getDate().getTimeInMillis();
-            } else {
-            	data.millis = Calendar.getInstance().getTimeInMillis();
-            }
-
-            if (serialGPSComponent.getGPSInterface().isValidFix()) {            	
-            	data.position = serialGPSComponent.getGPSInterface().getPosition();
-            } else {
-            	data.position = map.getMouseCoordinates();
-            }
-
-            if (serialGPSComponent.getGPSInterface().isValidTrueRdfHeading()) {
-                data.dopplerDirection = serialGPSComponent.getGPSInterface().getRdfHeadingTrue();
-                data.dopplerQuality = getRdfQuality(serialGPSComponent.getGPSInterface().getRdfQuality());
-            }
-
-            data.sentence = "#DBMTD";
-            data.testTileLastMeasured = utmTestTile;
-            data.tilesTraversed = tilesTraversed;
-            data.measurementDelayTimer= measurementTimer.getDelay();
-            data.tileIndexPointer = tileIndex.get(indexPointer).getMeasurementCount();
-            data.tileSize = coverageTestSettings.getTileSizeArcSeconds(data.position.y);
-            data.maximumSamplesPerTile = coverageTestSettings.getMaxSamplesPerTile();
-            data.minimumSamplesPerTile = coverageTestSettings.getMinSamplesPerTile();
-            data.marker = markerCounter;
-            
-            measurementsThisGrid.setText(measurementsTakenFormat.format(tileIndex.get(indexPointer).
-            	getMeasurementCount()));
-            
-            writeLogFileLine(data);
+        	MeasurementSet measurementSet = new MeasurementSet();
+	        
+	        measurementSet.setMarker(markerCounter);
+	        measurementSet.setMillis(networkTime.currentTimeInMillis());
+	        measurementSet.setPosition(serialGPSComponent.getGPSInterface().getPosition());
+	        measurementSet.setTestTileID(testTile.getID());
+	        
+	        database.appendMeasurementSet(testTile, measurementSet);
+	        map.changeTestTileColor(testTile, getTestTileColor(testTile));
         }
+	}
+    
+    private void createBlankTestTile(Point.Double lonLat) {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	map.setCursor(new Cursor(Cursor.WAIT_CURSOR));
+            }
+    	});
+    	learnModeHold = true;
+    	if (learnMode && mapSettings.isShowGrid()) {
+    		if (database == null) {
+    			invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+    	            @Override
+    	            public void run() {
+    	            	JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
+    	                    "Please create or open the data file for this coverage test", "SQL Database Error", JOptionPane.ERROR_MESSAGE); 
+    	            }
+    			});
+    		} else {
+    			Point.Double tileSizeArcSeconds = coverageTestSettings.getTileSizeArcSeconds(lonLat.getY());
+    			Precision precision = getRequiredPrecision(tileSizeArcSeconds);
+    			Point.Double gridReference = coverageTestSettings.getGridReference();
+    			Point.Double gridSize = coverageTestSettings.getGridSize();
+    			Point.Double testTileLowerLeftLonLat = CoordinateUtils.lonLatToLowerLeftCornerOfTile(lonLat, 
+    				tileSizeArcSeconds, gridReference, gridSize);
+    	        TestTile newTile = new TestTile(logFileName, testTileLowerLeftLonLat, tileSizeArcSeconds, precision);
+    			TestTile existingTile = database.testTileExists(newTile);
+    	        if (existingTile != null) {
+			    	database.deleteTestTile(existingTile);
+		    	} else {
+		    		database.appendTileRecord(newTile);
+		    	}
+    		}
+    	}
     }
 
     private Color getGpsColor(GPSInterface.FixQuality fixQuality) {
@@ -3585,6 +3734,10 @@ public class Main extends JFrame implements JMapViewerEventListener {
         }
 	}
 
+    private void playTileCompleteSound() {
+    	new AePlayWave(DEFAULT_TILE_COMPLETE_SOUND);
+    }
+    	
     private void zoomOutMouseDownTimerActionListenerEvent(ActionEvent event) {
         doZoomOut();
     }
@@ -3660,6 +3813,10 @@ public class Main extends JFrame implements JMapViewerEventListener {
         signalAnalysis.showSettingsDialog(true);
     }
     
+    private void databseConfigMenuActionListenerEvent(ActionEvent event) {
+        databaseConfig.showSettingsDialog(true);
+    }
+    
     private void staticSignalLocationSettingsMenuActionListenerEvent(ActionEvent event) {
         staticTestSettings.showSettingsDialog(true);
     }
@@ -3667,135 +3824,178 @@ public class Main extends JFrame implements JMapViewerEventListener {
     private void coverageTestSettingsMenuActionListenerEvent(ActionEvent event) {
         coverageTestSettings.showSettingsDialog(true);
     }
-
+    
     private void sinadChangedChangeListenerEvent(PropertyChangeEvent event) {
-    	SwingUtilities.invokeLater(new Runnable() {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
             	sinadArray[radioComponent.getRadioInterface().getCurrentChannel()] = (int) sinad.getSINAD();
-            	setSignalQualityDisplay(testMode);
+            	setSignalQualityDisplay(testMode, !radioComponent.isVfoMode());
             	if (lastInputSource == PositionSource.MANUAL && coverageTestSettings.getManualDataCollectionMode() == 0
-                && isCoverageTestModeActive && isRecord) {
-		            processDriveTestMeasurement();
+                && coverageTestActive && dataMode == DataMode.RECORD) {
+            		processCoverageTestMeasurement(PositionSource.MANUAL, serialGPSComponent.getGPSInterface().getPosition());
 		        }
             }
         }); 
     }
-
-    private void createNewDataFile() {
-    	newDataFileProgress = new ProgressMonitor(this,"Please Stand By",
-			"Creating New Data File",0,100);
-    	newDataFileProgress.setMillisToPopup(0);
-		Calendar cal = Calendar.getInstance();
-		recordPointer = 0;
-		recordCount = 0;
-		recordPointerLabel.setText(recordFormat.format(recordPointer));
-		recordCountLabel.setText(recordFormat.format(recordCount));
-		markerCounter = 0;
-		markerID.setText(markerFormat.format(markerCounter));
-		map.deleteAllQuads();
-		tileIndex.subList(0, tileIndex.size()).clear();
-		indexPointer = -1;
-		dotsPerTile = 0;
-		tilesTraversed = 0;
-		lastDotLocation = new Point.Double(0,0);
-		isRecord = false;
-		SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmmss");
-		String fln = sdf.format(cal.getTime()) + ".sql";
-		dataFileName = fln;
-		dataBase = new DataBase(this, lastDataFileDirectory, fln);
-		dataBase.addPropertyChangeListener(databaseListener);
-		logFileNameLabel.setText(fln);
+    
+    private void updateOpenDatabaseMonitor(int progress) {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+	        @Override
+	        public void run() {
+	            fileOpenMonitor.setNote(String.format("Completed %d%% of Database Recovery", progress)); 
+	            fileOpenMonitor.setProgress(progress);
+	        }
+	    });
     }
-
+    
+    private void updateNewFileMonitor(int progress) {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+	        @Override
+	        public void run() {
+	            newFileMonitor.setNote(String.format("Completed %d%% of new Database Build", progress)); 
+	            newFileMonitor.setProgress(progress);
+	        }
+	    });
+    }
+    
+    private void createNewDataFile(final File file) {
+    	updateNewFileMonitor(33);
+    	database = new DerbyRelationalDatabase();
+    	database.addPropertyChangeListener(databaseListener);
+		recordCount = 0;
+		markerCounter = 0;
+		lastDotLocation = new Point.Double(0,0);
+		map.deleteAllQuads();
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	tilesCompleted.setText(String.format("%07d", 0)); 
+				recordCountLabel.setText(String.format("%08d", recordCount)); 
+				markerID.setText(String.format("%5d", markerCounter)); 
+				if (file == null) {
+					SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmmss"); 
+					String fln = sdf.format(Calendar.getInstance().getTime()) + ".sql"; 
+					updateNewFileMonitor(66);
+					database.openDatabase(new File(dataDirectory.getPath() + File.separator + fln), USERNAME, PASSWORD,
+							testSettings);
+					logFileName = fln;
+					logFileNameLabel.setText(logFileName);
+				} else {
+					database.openDatabase(file, USERNAME, PASSWORD, testSettings);
+					logFileName = file.getName();
+					logFileNameLabel.setText(logFileName);
+				}
+            }
+		});
+    }
+    
     private void openDataFileMenuItemActionListenerEvent(ActionEvent event) {
-        JFileChooser fileChooser = new JFileChooser();
-		fileChooser.setCurrentDirectory(new File(lastDataFileDirectory));
-		FileNameExtensionFilter filter = new FileNameExtensionFilter("Coverage Test Database Files", "sql");
+    	openDataFile();
+    }
+    
+    private int openDataFile() {
+    	JFileChooser fileChooser = new JFileChooser(dataDirectory);
+    	
+    	fileChooser.setFileView(new FileView() {
+            @Override
+            public Boolean isTraversable(File f) {
+                return (f.isDirectory()); 
+            }
+        });
+    	
+    	FileNameExtensionFilter filter = new FileNameExtensionFilter("Database Files", "sql"); 
 		fileChooser.setFileFilter(filter);
-		fileChooser.setDialogTitle("Open Database File");
-		int returnVal = fileChooser.showOpenDialog(this);
+		fileChooser.setAcceptAllFileFilterUsed(false);
+		fileChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+		fileChooser.setMultiSelectionEnabled(false);
+		fileChooser.setDialogTitle("Open Database File"); 
+		
+		int returnVal = fileChooser.showOpenDialog(null);
+		
 		if (returnVal == JFileChooser.APPROVE_OPTION) {
-		    remove(fileChooser);
-		    repaint();
-		    lastDataFileDirectory = fileChooser.getCurrentDirectory().getPath();
-		    systemPref.put("LastDataFileDirectory", lastDataFileDirectory);
-		    dataFileName = fileChooser.getSelectedFile().getName();
-		    dataBase = new DataBase(this, fileChooser.getCurrentDirectory().getPath(), dataFileName);
-	        dataBase.addPropertyChangeListener(databaseListener);
-		    logFileNameLabel.setText(fileChooser.getSelectedFile().getName());
-		} else if (returnVal == JFileChooser.CANCEL_OPTION) {
-		    remove(fileChooser);
-		} 
+			systemPref.put("LastDataFileDirectory", fileChooser.getCurrentDirectory().getPath()); 
+			dataDirectory = fileChooser.getCurrentDirectory();
+		    if (!fileChooser.getCurrentDirectory().exists()) {
+		    	createNewDataFile(fileChooser.getCurrentDirectory());
+		    	returnVal = 3;
+		    } else {
+			    database = new DerbyRelationalDatabase();
+		        database.addPropertyChangeListener(databaseListener);
+		        database.openDatabase(fileChooser.getSelectedFile(), USERNAME, PASSWORD, testSettings);
+		        logFileName = fileChooser.getSelectedFile().getName();
+			    logFileNameLabel.setText(logFileName);
+		    }
+		    dataMode = DataMode.RECORD;
+		}
+		remove(fileChooser);
+		repaint();
+		return returnVal;
     }
 
     private void closeDataFileMenuItemActionListenerEvent(ActionEvent event) {
-        if (dataMode != DataMode.CLOSED && !dataBase.isClosed()) {
-			dataBase.close();
+        if (dataMode != DataMode.CLOSED && !database.isClosed()) {
+			database.close();
 		}
     }
 
     private void saveDataFileMenuItemActionListenerEvent(ActionEvent event) {
-        if (dataMode != DataMode.CLOSED && !dataBase.isClosed()) {
-		    dataBase.save();
+        if (dataMode != DataMode.CLOSED && !database.isClosed()) {
+		    database.save();
 		}
     }
 
     private void saveAsDataFileMenuItemActionListenerEvent(ActionEvent event) {
         if (dataMode != DataMode.CLOSED) {
             JFileChooser fileChooser = new JFileChooser();
-            if (lastDataFileDirectory != null) {
-                fileChooser.setCurrentDirectory(new File(lastDataFileDirectory));
-            }
-            FileNameExtensionFilter filter = new FileNameExtensionFilter("Coverage Test Database Files", "sql");
+            FileNameExtensionFilter filter = new FileNameExtensionFilter("Test Database Files", "sql"); 
             fileChooser.setFileFilter(filter);
-            fileChooser.setDialogTitle("Save Database File As");
-            fileChooser.showSaveDialog(this);
+            fileChooser.setDialogTitle("Save Database File As"); 
+            fileChooser.showSaveDialog(null);
             File from = null;
             File to = null;
             if (event.getID() == JFileChooser.APPROVE_OPTION) {
-                int currentRecord = dataBase.getIndexCursor();
-				dataBase.close();
-				from = new File(dataFileName);
-				dataFileName = fileChooser.getCurrentDirectory().getPath() + fileChooser.getSelectedFile().getName() + 
-						".sql";
-				to = new File(dataFileName);
+            	from = dataDirectory;
+				to = fileChooser.getSelectedFile();
+				database.close();
 				if (!from.renameTo(to)) {
-					log.log(Level.WARNING, "IOException", "File rename failed");
-				    SwingUtilities.invokeLater(new Runnable() {
+					log.log(Level.WARNING, "IOException", "File rename failed"); 
+				    invokeLaterInDispatchThreadIfNeeded(new Runnable() {
 				        @Override
 				        public void run() {
 				            JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-				            	"File rename failed", "I/O Exception", JOptionPane.ERROR_MESSAGE);
+				            	"File rename failed", "I/O Exception", JOptionPane.ERROR_MESSAGE); 
 				        }
 				    });
-					lastDataFileDirectory = fileChooser.getCurrentDirectory().getPath();
-					systemPref.put("LastDataFileDirectory", lastDataFileDirectory);	
-					dataFileName = from.getPath() + from.getName();
+				    database.openDatabase(to, USERNAME, PASSWORD);
+				} else {
+					dataDirectory = to;
+					systemPref.put("LastDataFileDirectory", dataDirectory.getParent()); 
+					logFileNameLabel.setText(fileChooser.getSelectedFile().getName());
 				}
-				dataBase = new DataBase(this, dataFileName);
-				logFileNameLabel.setText(fileChooser.getSelectedFile().getName());
-				remove(fileChooser);
-				if (dataBase.getRecordCount() > 0) dataBase.seek(currentRecord); 
-                remove(fileChooser);
             } 
-        }
-    }
-
-    private void writeLogFileLine(DriveTestData data) {
-        if (dataMode == DataMode.RECORD) {
-            dataBase.appendRecord(data);
+            remove(fileChooser);
         }
     }
 
     private void gpsReceivedDataPropertyChangeListenerEvent(final PropertyChangeEvent event) {
-        nmeaSentenceStringLabel.setText((String) event.getNewValue());
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+		    @Override
+		    public void run() {
+		        nmeaSentenceStringLabel.setText((String) event.getNewValue());
+		    }
+		});
     }
 
     private void gpsCourseMadeGoodTruePropertyChangeListenerEvent(final PropertyChangeEvent event) {
-    	gpsCompassRose.setSelectColor(getGpsColor(serialGPSComponent.getGPSInterface().getFixQuality()));
-        gpsValidHeadingTimer.restart();
-        gpsCompassRose.setHeading((int) serialGPSComponent.getGPSInterface().getCourseMadeGoodTrue());
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+		    @Override
+		    public void run() {
+		    	gpsCompassRose.setSelectColor(getGpsColor(serialGPSComponent.getGPSInterface().getFixQuality()));
+		        gpsValidHeadingTimer.restart();
+		        gpsCompassRose.setHeading((int) serialGPSComponent.getGPSInterface().getCourseMadeGoodTrue());
+		    }
+		});
     }
 
     private Color getGpsStatusForegroundColor(GPSInterface.FixQuality fixQuality) {
@@ -3838,510 +4038,712 @@ public class Main extends JFrame implements JMapViewerEventListener {
     
     private String getGpsStatusText(GPSInterface.FixQuality fixQuality) {
         switch (fixQuality) {
-		    case FIX_3D: return "3D Fix";
-	        case FIX_2D: return "2D Fix";
-	        case DGPS_FIX: return "DGPS Fix";
-	        case PPS_FIX: return "PPS Fix";
-	        case RTK: return "RTK";
-	        case FLOAT_RTK: return "FLT RTK";
-	        case ESTIMATED: return "EST";
-	        case MANUAL: return "MANUAL";
-	        case SIMULATION: return "SIM";
-	        case OFF_LINE: return "OFF LINE";
-	        case ACQUIRING: return "ACQUIRE";
-	        case INVALID: return "INVALID";
-	        case ERROR: return "DOWN";
-	        default: return "ERROR";
+		    case FIX_3D: return "3D Fix"; 
+	        case FIX_2D: return "2D Fix"; 
+	        case DGPS_FIX: return "DGPS Fix"; 
+	        case PPS_FIX: return "PPS Fix"; 
+	        case RTK: return "RTK"; 
+	        case FLOAT_RTK: return "FLT RTK"; 
+	        case ESTIMATED: return "EST"; 
+	        case MANUAL: return "MANUAL"; 
+	        case SIMULATION: return "SIM"; 
+	        case OFF_LINE: return "OFF LINE"; 
+	        case ACQUIRING: return "ACQUIRE"; 
+	        case INVALID: return "INVALID"; 
+	        case ERROR: return "DOWN"; 
+	        default: return "ERROR"; 
         }
 	}
     
     private void gpsFixQualityPropertyChangeListenerEvent(final PropertyChangeEvent event) {
     	FixQuality fixQuality = (FixQuality) event.getNewValue();
-    	centerOnGpsButton.setEnabled(serialGPSComponent.getGPSInterface().isValidFix());
-    	gpsStatus.setBackground(getGpsStatusBackgroundColor(fixQuality));
-    	gpsStatus.setForeground(getGpsStatusForegroundColor(fixQuality));
-    	gpsStatus.setText(getGpsStatusText(fixQuality));
-    	map.setGpsSymbolColor(getGpsColor(fixQuality));
-    	latitude.setForeground(Color.BLACK);
-    	longitude.setForeground(Color.BLACK);
-    	currentMGRS.setForeground(Color.BLACK);
-    	currentGridSquare.setForeground(Color.BLACK);
-    	speedMadeGood.setForeground(Color.BLACK);
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	centerOnGpsButton.setEnabled(serialGPSComponent.getGPSInterface().isValidFix());
+		    	gpsStatus.setBackground(getGpsStatusBackgroundColor(fixQuality));
+		    	gpsStatus.setForeground(getGpsStatusForegroundColor(fixQuality));
+		    	gpsStatus.setText(getGpsStatusText(fixQuality));
+		    	map.setGpsSymbolColor(getGpsColor(fixQuality));
+		    	latitude.setForeground(Color.BLACK);
+		    	longitude.setForeground(Color.BLACK);
+		    	currentMGRS.setForeground(Color.BLACK);
+		    	if (!coverageTestActive) currentGridSquare.setForeground(Color.BLACK);
+		    	speedMadeGood.setForeground(Color.BLACK);
+            }
+        });
     }
 
    	private void gpsRxDataPropertyChangeListenerEvent(final PropertyChangeEvent event) {
-        gpsRxData.setBackground(Color.GREEN);
+   		invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	gpsRxData.setBackground(Color.GREEN);
+            }
+        });
         gpsRxDataTimer.start();
     }
 
     private void gpsCTSHoldingPropertyChangeListenerEvent(final PropertyChangeEvent event) {
-        if ((boolean) event.getNewValue()) {
-            gpsCTS.setBackground(Color.GREEN);
-        } else {
-            gpsCTS.setBackground(Color.RED);
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if ((boolean) event.getNewValue()) {
+		            gpsCTS.setBackground(Color.GREEN);
+		        } else {
+		            gpsCTS.setBackground(Color.RED);
+		        }
+            }
+        });	
     }
 
     private void gpsDSRHoldingPropertyChangeListenerEvent(final PropertyChangeEvent event) {
-        if ((boolean) event.getNewValue()) {
-            gpsDSR.setBackground(Color.GREEN);
-        } else {
-            gpsDSR.setBackground(Color.RED);
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if ((boolean) event.getNewValue()) {
+		            gpsDSR.setBackground(Color.GREEN);
+		        } else {
+		            gpsDSR.setBackground(Color.RED);
+		        }
+            }
+        });
     }
 
     private void gpsCDHoldingPropertyChangeListenerEvent(final PropertyChangeEvent event) {
-        if ((boolean) event.getNewValue()) {
-            gpsCD.setBackground(Color.GREEN);
-        } else {
-            gpsCD.setBackground(Color.RED);
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if ((boolean) event.getNewValue()) {
+		            gpsCD.setBackground(Color.GREEN);
+		        } else {
+		            gpsCD.setBackground(Color.RED);
+		        }           	
+            }
+        });
     }
     
     private void radioBusyChangeListenerEvent(final PropertyChangeEvent event) {
-    	if (!radioButton.isSelected()) return;
-    	if ((boolean) event.getNewValue()) {
-            radioStatus.setText("BUSY");
-            radioStatus.setBackground(Color.YELLOW);
-        } else {
-            radioStatus.setText("MON");
-            radioStatus.setBackground(Color.RED);
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if (!radioButton.isSelected()) return;
+		    	if ((boolean) event.getNewValue()) {
+		            radioStatus.setText("BUSY"); 
+		            radioStatus.setBackground(Color.YELLOW);
+		        } else {
+		            radioStatus.setText("MON"); 
+		            radioStatus.setBackground(Color.RED);
+		        }
+            }
+        });
     }
     
     private void radioPowerChangeListenerEvent(final PropertyChangeEvent event) {
     	if ((boolean) event.getNewValue()) {
-    		radioStatus.setText("POWER");
-            radioStatus.setBackground(new Color(127,0,0));
+    		invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+                @Override
+                public void run() {
+                	radioStatus.setText("POWER"); 
+                	radioStatus.setBackground(new Color(127,0,0));
+                }
+            });
         }
     }
     
     private void radioReadyChangeListenerEvent(final PropertyChangeEvent event) {
-    	if ((boolean) event.getNewValue()) {
-    		radioStatus.setText("ON LINE");
-            radioStatus.setBackground(Color.GREEN);
-        } else {
-        	radioStatus.setText("OFF LINE");
-            radioStatus.setBackground(Color.RED);
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if ((boolean) event.getNewValue()) {
+		    		radioStatus.setText("ON LINE"); 
+		            radioStatus.setBackground(Color.GREEN);
+		        } else {
+		        	radioStatus.setText("OFF LINE"); 
+		            radioStatus.setBackground(Color.RED);
+		        }
+            }
+        });
     }
     
     private void radioRSSIChangeListenerEvent(final PropertyChangeEvent event) {
-        signalMeterArray.setMeterLevel(radioComponent.getRadioInterface().getPercentList());
-        setSignalQualityDisplay(testMode);
-        if (lastInputSource == PositionSource.MANUAL && coverageTestSettings.getManualDataCollectionMode() == 0
-                && isCoverageTestModeActive && isRecord) {
-            processDriveTestMeasurement();
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+		        setSignalQualityDisplay(testMode, !radioComponent.isVfoMode());
+		        if (lastInputSource == PositionSource.MANUAL && coverageTestSettings.getManualDataCollectionMode() == 0
+		        		&& coverageTestActive && dataMode == DataMode.RECORD) {
+		        	processCoverageTestMeasurement(PositionSource.MANUAL, serialGPSComponent.getGPSInterface().getPosition());
+                }
+            }
+        });
     }
-
+    
+    private void radioScanChannelReadyChangeListenerEvent(final PropertyChangeEvent event) {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+		        if (testMode != TestMode.OFF) signalMeterArray.setMeterLevels(radioComponent.getRadioInterface().getPercentArray());
+		        setSignalQualityDisplay(testMode, !radioComponent.isVfoMode());
+		        if (lastInputSource == PositionSource.MANUAL && coverageTestSettings.getManualDataCollectionMode() == 0
+		        		&& coverageTestActive && dataMode == DataMode.RECORD) {
+		        	processCoverageTestMeasurement(PositionSource.MANUAL, serialGPSComponent.getGPSInterface().getPosition());
+                }
+            }
+        });
+    }
+    
     private void radioBERChangeListenerEvent(final PropertyChangeEvent event) {
-        setSignalQualityDisplay(testMode);
-        if (lastInputSource == PositionSource.MANUAL && coverageTestSettings.getManualDataCollectionMode() == 0
-                && isCoverageTestModeActive && isRecord) {
-            processDriveTestMeasurement();
-        }
+        invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if (testMode != TestMode.OFF) setSignalQualityDisplay(testMode, !radioComponent.isVfoMode());
+		        if (lastInputSource == PositionSource.MANUAL && coverageTestSettings.getManualDataCollectionMode() == 0
+		        		&& coverageTestActive && dataMode == DataMode.RECORD) {
+		        	processCoverageTestMeasurement(PositionSource.MANUAL, serialGPSComponent.getGPSInterface().getPosition());
+                }
+            }  
+        });
     }
 
-    private void setSignalQualityDisplay(TestMode testMode) {
-        for (int i = 0; i < signalQuality.length; i++) {
-        	if (testMode == TestMode.RSSI) {
-        		signalQuality[i].setText(dBmFormat.format(radioComponent.getRadioInterface().getdBmList()[i]));
-        	} else if (testMode == TestMode.SINAD) {
-        		signalQuality[i].setText(dBmFormat.format(radioComponent.getRadioInterface().getdBmList()[i]) + " / " +
-        			sinadFormat.format(sinadArray[i]));
-        	} else if (testMode == TestMode.BER) {
-        		signalQuality[i].setText(dBmFormat.format(radioComponent.getRadioInterface().getdBmList()[i]) + " / " +
-        			berFormat.format(radioComponent.getRadioInterface().getBERList()[i]));	
-        	}
-        }
+    private void setSignalQualityDisplay(TestMode testMode, boolean isScanning) {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	int scanLength;
+            	if (isScanning) {
+            		scanLength = signalQuality.length;
+            		if (testMode != TestMode.OFF) signalMeterArray.setMeterLevels(radioComponent.getRadioInterface().getPercentArray());
+            	} else {
+            		scanLength = 1;
+            		if (testMode != TestMode.OFF) signalMeterArray.setMeterLevel(0, radioComponent.getRadioInterface().getPercentList().get(0));
+            	}
+            	for (int i = 0; i < scanLength; i++) {
+            		if (testMode == TestMode.OFF) {
+            			signalQuality[i].setText(""); 
+            		} else if (testMode == TestMode.RSSI) {
+		        		signalQuality[i].setText(String.format("%3.1f", radioComponent.getRadioInterface().getdBm(i))); 
+		        	} else if (testMode == TestMode.SINAD) {
+		        		signalQuality[i].setText(String.format("%3.1f", radioComponent.getRadioInterface().getdBm(i)) + " / " + 
+		        			String.format("%2d", sinadArray[i])); 
+		        	} else if (testMode == TestMode.BER) {
+		        		signalQuality[i].setText(String.format("%3.1f", radioComponent.getRadioInterface().getdBm(i)) + " / " + 
+		        			String.format("%1.2f", radioComponent.getRadioInterface().getBer(i)));	 
+		        	}
+	            }
+            }
+	    });
     }
 
     private void aprsTxDataChangeListenerEvent(final PropertyChangeEvent event) {
-        aprsTxData.setBackground(Color.GREEN);
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	aprsTxData.setBackground(Color.GREEN);
+            }
+        });
         aprsTxDataTimer.start();
     }
 
     private void aprsRxCharChangeListenerEvent(final PropertyChangeEvent event) {
-        aprsRxData.setBackground(Color.GREEN);
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	aprsRxData.setBackground(Color.GREEN);
+            }
+        });
         aprsRxDataTimer.start();
     }
 
     private void aprsCTSHoldingChangeListenerEvent(final PropertyChangeEvent event) {
-        if ((boolean) event.getNewValue()) {
-            aprsCTS.setBackground(Color.GREEN);
-        } else {
-            aprsCTS.setBackground(Color.RED);
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if ((boolean) event.getNewValue()) {
+		            aprsCTS.setBackground(Color.GREEN);
+		        } else {
+		            aprsCTS.setBackground(Color.RED);
+		        }
+            }
+        });
     }
 
     private void aprsDSRHoldingChangeListenerEvent(final PropertyChangeEvent event) {
-        if ((boolean) event.getNewValue()) {
-            aprsDSR.setBackground(Color.GREEN);
-        } else {
-            aprsDSR.setBackground(Color.RED);
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if ((boolean) event.getNewValue()) {
+		            aprsDSR.setBackground(Color.GREEN);
+		        } else {
+		            aprsDSR.setBackground(Color.RED);
+		        }
+            }
+        });
     }
 
     private void aprsCDHoldingChangeListenerEvent(final PropertyChangeEvent event) {
-        if ((boolean) event.getNewValue()) {
-            aprsCD.setBackground(Color.GREEN);
-        } else {
-            aprsCD.setBackground(Color.RED);
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if ((boolean) event.getNewValue()) {
+		            aprsCD.setBackground(Color.GREEN);
+		        } else {
+		            aprsCD.setBackground(Color.RED);
+		        }
+            }
+        });
     }
     
     private void radioTxDataChangeListenerEvent(final PropertyChangeEvent event) {
-        radioTxData.setBackground(Color.GREEN);
-        radioTxDataWord.setText((String) event.getNewValue());
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	radioTxData.setBackground(Color.GREEN);
+            }
+        });
         radioTxDataTimer.start();
     }
     
     private void radioRxCharChangeListenerEvent(final PropertyChangeEvent event) {
-    	radioRxData.setBackground(Color.GREEN);
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	radioRxData.setBackground(Color.GREEN);
+            }
+        });
     	radioRxDataTimer.start();
     }
     
     private void radioRxDataChangeListenerEvent(final PropertyChangeEvent event) {
-        radioRxDataWord.setText((String) event.getNewValue());
+
     }
 
     private void radioOnlineChangeListenerEvent(final PropertyChangeEvent event) {
-    	if ((boolean) event.getNewValue()) {
-    		radioCTS.setBackground(Color.RED);
-    		radioCD.setBackground(Color.RED);
-    		radioDSR.setBackground(Color.RED);
-    		radioRxData.setBackground(Color.RED);
-    		radioTxData.setBackground(Color.RED);
-        } else {
-        	radioCTS.setBackground(new Color(127,0,0));
-    		radioCD.setBackground(new Color(127,0,0));
-    		radioDSR.setBackground(new Color(127,0,0));
-    		radioRxData.setBackground(new Color(127,0,0));
-    		radioTxData.setBackground(new Color(127,0,0));
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if ((boolean) event.getNewValue()) {
+		    		radioCTS.setBackground(Color.RED);
+		    		radioCD.setBackground(Color.RED);
+		    		radioDSR.setBackground(Color.RED);
+		    		radioRxData.setBackground(Color.RED);
+		    		radioTxData.setBackground(Color.RED);
+		        } else {
+		        	radioCTS.setBackground(new Color(127,0,0));
+		    		radioCD.setBackground(new Color(127,0,0));
+		    		radioDSR.setBackground(new Color(127,0,0));
+		    		radioRxData.setBackground(new Color(127,0,0));
+		    		radioTxData.setBackground(new Color(127,0,0));
+		        }
+            }
+        });
     }
     
     private void gpsOnlineChangeListenerEvent(final PropertyChangeEvent event) {
-    	if ((boolean) event.getNewValue()) {
-    		gpsCTS.setBackground(Color.RED);
-    		gpsCD.setBackground(Color.RED);
-    		gpsDSR.setBackground(Color.RED);
-    		gpsRxData.setBackground(Color.RED);
-    		gpsTxData.setBackground(Color.RED);
-        } else {
-        	gpsCTS.setBackground(new Color(127,0,0));
-    		gpsCD.setBackground(new Color(127,0,0));
-    		gpsDSR.setBackground(new Color(127,0,0));
-    		gpsRxData.setBackground(new Color(127,0,0));
-    		gpsTxData.setBackground(new Color(127,0,0));
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if ((boolean) event.getNewValue()) {
+		    		gpsCTS.setBackground(Color.RED);
+		    		gpsCD.setBackground(Color.RED);
+		    		gpsDSR.setBackground(Color.RED);
+		    		gpsRxData.setBackground(Color.RED);
+		    		gpsTxData.setBackground(Color.RED);
+		        } else {
+		        	gpsCTS.setBackground(new Color(127,0,0));
+		    		gpsCD.setBackground(new Color(127,0,0));
+		    		gpsDSR.setBackground(new Color(127,0,0));
+		    		gpsRxData.setBackground(new Color(127,0,0));
+		    		gpsTxData.setBackground(new Color(127,0,0));
+		        }
+            }
+        });
     }
     
     private void invalidComPortChangeListenerEvent(final PropertyChangeEvent event, final String device) {
-    	SwingUtilities.invokeLater(new Runnable() {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
             @Override
             public void run() {
                 JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
-                    "The " + device + " is configured to use comm port " + event.getNewValue() + "\n" +
-                    "Please select a valid comm port from the " + device + " settings menu.\n",
-                    "Comm Port Error", JOptionPane.ERROR_MESSAGE);
+                    "The " + device + " is configured to use comm port " + event.getNewValue() + "\n" +  
+                    "Please select a valid comm port from the " + device + " settings menu.\n", 
+                    "Comm Port Error", JOptionPane.ERROR_MESSAGE); 
             }
         });
     }
     
     private void radioCTSHoldingChangeListenerEvent(final PropertyChangeEvent event) {
-        if ((boolean) event.getNewValue()) {
-            radioCTS.setBackground(Color.GREEN);
-        } else {
-            radioCTS.setBackground(Color.RED);
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if ((boolean) event.getNewValue()) {
+		            radioCTS.setBackground(Color.GREEN);
+		        } else {
+		            radioCTS.setBackground(Color.RED);
+		        }
+            }
+        });
     }
 
     private void radioDSRHoldingChangeListenerEvent(final PropertyChangeEvent event) {
-        if ((boolean) event.getNewValue()) {
-            radioDSR.setBackground(Color.GREEN);
-        } else {
-            radioDSR.setBackground(Color.RED);
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if ((boolean) event.getNewValue()) {
+            		radioDSR.setBackground(Color.GREEN);
+		        } else {
+		            radioDSR.setBackground(Color.RED);
+		        }
+            }
+        });
     }
 
     private void radioCDHoldingChangeListenerEvent(final PropertyChangeEvent event) {
-        if ((boolean) event.getNewValue()) {
-            radioCD.setBackground(Color.GREEN);
-        } else {
-            radioCD.setBackground(Color.RED);
-        }
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	if ((boolean) event.getNewValue()) {
+		            radioCD.setBackground(Color.GREEN);
+		        } else {
+		            radioCD.setBackground(Color.RED);
+		        }
+            }
+        });
     }
 
-	private void startReplayLogFile() {
-		shutdownMask = shutdownMask & ALL_THREADS_RELEASED - LOG_REPLAY_COMPLETE;
-		
-		logReplayProgressMonitor = new ProgressMonitor(this, "Replaying Log File", 
-			String.format("Completed %d%% of log file replay\n", 0), 0, 100);
-
-		driveTestData = new DriveTestData();
-		
-		indexPointer = 0;
-		dataBase.findFirstRow();
-		
-		mapClearMenuActionListenerEvent(null);
-		
-		tileIndex.subList(0, tileIndex.size()).clear();
-
-		setDataMode(DataMode.REPLAY);
-
-		for (int i = 1; i <= recordCount; i++) {
-			if (isStaticModeActive) dataBase.requestStaticMeasurementData(i);
-			if (isCoverageTestModeActive) dataBase.requestDriveTestData(i);
-		    if (dataMode == DataMode.STOP || isVMShuttingDown) break;
-		}
-    }
-
-    protected void databaseStaticMeasurementDataReady(final PropertyChangeEvent event) {
-    	recordPointer = dataBase.getIndexCursor();
-		recordPointerLabel.setText(recordFormat.format(recordPointer));
-		StaticMeasurement sm = (StaticMeasurement) event.getNewValue();
-		if (sm.timeStamp > 0) {
-			if (checkMapRecenter(sm.point)) map.setCenterLonLat(sm.point);
-			processStaticMeasurement(sm);
-		}
-		int progress = recordPointer / recordCount * 100;
-		logReplayProgressMonitor.setProgress(progress);
-		logReplayProgressMonitor.setNote(String.format("Completed %d%% of log file replay\n", progress));
-		if (recordPointer == recordCount) {
-			logReplayProgressMonitor.setProgress(100);
-			setDataMode(DataMode.REPLAY_COMPLETE);
-			signalReadyToExit(LOG_REPLAY_COMPLETE);
-		}
-	}
-
-	protected void databaseDriveTestDataReady(final PropertyChangeEvent event) {
-		recordPointer = dataBase.getIndexCursor();
-		recordPointerLabel.setText(recordFormat.format(recordPointer));
-        if (driveTestData.sentence.substring(0, 1).toString().equals("#")) {
-            coverageTestSettings.setTileSize(driveTestData.tileSize);
-            coverageTestSettings.setMinSamplesPerTile(driveTestData.minimumSamplesPerTile);
-            coverageTestSettings.setMaxSamplesPerTile(driveTestData.maximumSamplesPerTile);
-            logFileRSSI = driveTestData.rssi[0];
-            logFileSINAD = driveTestData.sinad[0];
-            logFileBER = driveTestData.ber[0];
-            if (checkMapRecenter(driveTestData.position)) map.setCenterLonLat(driveTestData.position);
-            processPositionInformation(PositionSource.ARCHIVE, driveTestData.position);
-        }
-		int progress = recordPointer / recordCount * 100;
-		logReplayProgressMonitor.setProgress(progress);
-		logReplayProgressMonitor.setNote(String.format("Completed %d%% of log file replay", progress));
-        if (recordPointer == recordCount) {
-        	logReplayProgressMonitor.setProgress(100);
-			setDataMode(DataMode.REPLAY_COMPLETE);
-			signalReadyToExit(LOG_REPLAY_COMPLETE);
-		}
-	}
-
-	protected void databaseAppendedChangeListenerEvent(final PropertyChangeEvent event) {
-    	recordCount = dataBase.getRecordCount();
-        recordPointer = recordCount;
-        recordPointerLabel.setText(recordFormat.format(recordPointer));
-        recordCountLabel.setText(recordFormat.format(recordCount));
+	private void updateCoverageTestRestoreMonitorProgress(int progress) {
+		invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	coverageTestRestoreMonitor.setProgress(progress);
+        		coverageTestRestoreMonitor.setNote(String.format("Completed %d%% of coverage test restore\n", progress)); 
+            }
+        });
 	}
 	
-	protected void databaseClosedChangeListenerEvent(final PropertyChangeEvent event) {
-		dataBase.removePropertyChangeListener(databaseListener);
-    	setDataMode(DataMode.CLOSED);
-    	signalReadyToExit(SQL_DATABASE_CLOSED);
+	private void updateStaticTestRestoreMonitorProgress(int progress) {
+		invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	staticTestRestoreMonitor.setProgress(progress);
+        		staticTestRestoreMonitor.setNote(String.format("Completed %d%% of static test restore\n", progress)); 
+            }
+        });
 	}
 	
-	protected void databaseRecordCountReadyChangeListenerEvent(final PropertyChangeEvent event) {
-		recordCountLabel.setText(recordFormat.format(event.getNewValue()));
-		recordPointer = 0;
-		recordPointerLabel.setText(recordFormat.format(recordPointer));
+	private void testSettingsLoadedEvent(final PropertyChangeEvent event) {
+		testSettings = ((TestSettings) event.getNewValue()); 
+		populateCoverageTestSettingDialogFromCurrentTestSettings(testSettings);
+		setMeasurementPeriodText(String.format("%4d", measurementDelay)); 
+		setMinMeasurementsPerTileText(String.format("%6d", testSettings.getMinimumSamplesPerTile())); 
+		setMaxMeasurementsPerTileText(String.format("%6d", testSettings.getMaximumSamplesPerTile())); 
 	}
 	
-	protected void databaseOpenChangeListenerEvent(final PropertyChangeEvent event) {
-		if (isCoverageTestModeActive) {
+	private void populateCurrentTestSettingsFromCoverageTestSettingsDialog() {
+		testSettings.setDotsPerTile(coverageTestSettings.getDotsPerTile());
+		testSettings.setGridReference(coverageTestSettings.getGridReference());
+		testSettings.setGridSize(coverageTestSettings.getGridSize());
+		testSettings.setMaximumSamplesPerTile(coverageTestSettings.getMaxSamplesPerTile());
+		testSettings.setMinimumSamplesPerTile(coverageTestSettings.getMinSamplesPerTile());
+		testSettings.setSampleTimingMode(coverageTestSettings.getSampleTimingMode());
+		testSettings.setTileSize(coverageTestSettings.getTileSizeArcSeconds(coverageTestSettings.getGridReference().y));
+		testSettings.setMinimumTimePerTile(coverageTestSettings.getMinTimePerTile());
+	}
+	
+	private void populateCoverageTestSettingDialogFromCurrentTestSettings(TestSettings testSettings) {
+		coverageTestSettings.setMinSamplesPerTile(testSettings.getMinimumSamplesPerTile());
+		coverageTestSettings.setMaxSamplesPerTile(testSettings.getMaximumSamplesPerTile());
+		coverageTestSettings.setTileSize(testSettings.getTileSize());
+		coverageTestSettings.setGridReference(testSettings.getGridReference());
+		coverageTestSettings.setGridSize(testSettings.getGridSize());
+		coverageTestSettings.setDotsPerTile(testSettings.getDotsPerTile());
+		coverageTestSettings.setMinTimePerTile(testSettings.getMinimumTimePerTile());
+		coverageTestSettings.setSampleTimingMode(testSettings.getSampleTimingMode());
+		map.setTileSize(coverageTestSettings.getTileSizeArcSeconds(coverageTestSettings.getGridReference().y));
+		map.setGridReference(coverageTestSettings.getGridReference());
+		map.setGridSize(coverageTestSettings.getGridSize());
+		map.showGrid(true);
+		map.showTestTiles(true);
+	}
+	
+    private void staticMeasurementDataReadyEvent(final PropertyChangeEvent event) {
+
+	}
+
+	private void measurementSetDataReadyEvent(final PropertyChangeEvent event) {
+		
+	}
+	
+	private void allStaticRecordsReadyEvent(final PropertyChangeEvent event) {
+		compileStaticMeasurements();
+	}
+	
+	private Color getTestTileColor(TestTile testTile) {
+		if (testTile.getMeasurementCount() == 0) return tileSelectedColor;
+		else if (testTile.getMeasurementCount() < coverageTestSettings.getMinSamplesPerTile()) return tileInProgressColor;
+		else if (testTile.getMeasurementCount() >= coverageTestSettings.getMaxSamplesPerTile()) return tileCompleteColor;
+		else return tileSelectedColor;
+	}
+	
+	private void allTileRecordsReadyEvent(final PropertyChangeEvent event) {
+		List<TestTile> tileList = database.getTileRecordList();
+		if (tileList != null) { 
+			for (TestTile testTile : tileList) {
+				GeoTile geoTile = new GeoTile(testTile.getLonLat(), testTile.getTileSize());
+	            map.addTestTile(geoTile, getTestTileColor(testTile), testTile.getID());
+	            updateTileDisplay(testTile);
+			}
+		}
+		invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+		    @Override
+		    public void run() {
+				totalTiles.setText(String.format("%07d", database.getTileRecordList().size())); 
+		    }
+		});
+    	updateOpenDatabaseMonitor(100);
+    	updateNewFileMonitor(100);
+		if (coverageTestActive || staticTestActive) {
 	    	setDataMode(DataMode.RECORD);
 		} else {
 			setDataMode(DataMode.OPEN);
 		}
-		newDataFileProgress.setProgress(100);
-		shutdownMask = shutdownMask & ALL_THREADS_RELEASED - SQL_DATABASE_CLOSED;
+	}
+	
+	private void measurementSetTableAppendedEvent(final PropertyChangeEvent event) {
+		for (int i = 0; i < 10; i++) {
+        	if (radioComponent.getRadioInterface().getScanSelectList(i)) {
+        		Measurement measurement = new Measurement();
+        		measurement.setFrequency(radioComponent.getRadioInterface().getFrequency(i));
+	        	measurement.setSelected(radioComponent.getRadioInterface().getScanSelectList(i));
+	        	measurement.setBer(radioComponent.getRadioInterface().getBer(i));        
+	        	measurement.setSinad(radioComponent.getRadioInterface().getSinad(i));
+	        	measurement.setdBm(radioComponent.getRadioInterface().getdBm(i));
+	        	MeasurementSet measurementSet = (MeasurementSet) event.getNewValue();
+	        	database.appendMeasurement(measurementSet, measurement);
+	        	showSignalMarker(coverageTestSettings.getSignalQualityDisplayMode(), radioComponent.getRadioInterface().getCurrentChannel());
+        	}
+        }
+	}
+	
+	private void staticTableAppendedEvent(final PropertyChangeEvent event) {
+		
+	}
+	
+	private void tileTableAppendedEvent(final PropertyChangeEvent event) {
+		invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+		    @Override
+		    public void run() {
+		        int total = database.getTileRecordList().size();
+				totalTiles.setText(String.format("%07d", total)); 
+				learnModeHold = false;
+				TestTile newTile = (TestTile) event.getNewValue();
+				map.addTestTile(new GeoTile(newTile.getLonLat(), newTile.getTileSize()), getTestTileColor(newTile), newTile.getID());
+				updateTileDisplay(newTile);
+				map.setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
+		    }
+		});
+	}
+	
+	private void tileDeletedEvent(final PropertyChangeEvent event) {
+		invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+		    @Override
+		    public void run() {
+		        int total = database.getTileRecordList().size();
+				totalTiles.setText(String.format("%07d", total)); 
+				learnModeHold = false;
+				TestTile testTile = (TestTile) event.getNewValue();
+		    	map.deleteTestTile(testTile);
+				map.setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
+		    }
+		});
+	}
+	
+	private void measurementSetRecordCountReadyEvent(final PropertyChangeEvent event) {
+		invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+		    @Override
+		    public void run() {
+		        recordCountLabel.setText(String.format("%08d", (Integer) event.getNewValue())); 
+		    }
+		});
+	}
+
+	private void tileCompleteCountReadyEvent(final PropertyChangeEvent event) {
+		invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+				tilesCompleted.setText(String.format("%07d", (int) event.getNewValue())); 
+            }
+		});
+	}
+	
+	private void staticRecordCountReadyEvent(final PropertyChangeEvent event) {
+		
+	}
+	
+	private void tileRecordCountReadyEvent(final PropertyChangeEvent event) {
+		if (coverageTestActive) {
+			if ((Integer) event.getNewValue() == 0) {
+				invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+		            @Override
+		            public void run() {
+		            	JOptionPane.showMessageDialog(SwingUtilities.getWindowAncestor(Main.this),
+			                "Tiles must be selected before coverage test can begin", "Coverage Test Error", JOptionPane.ERROR_MESSAGE); 
+		            }
+		        });
+				stopCoverageTest();
+				return;
+			}
+	    	if (!radioComponent.isRadioOnLine()) startRadio();
+	    	if (!serialGPSComponent.isGpsOnLine()) startGps();
+	        coverageTestSettings.setControlsEnabled(false);
+	        periodTimerTimeOut = false;
+	        periodTimerHalt = false;
+	        periodTimer.start();
+		}
+		invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+		    @Override
+		    public void run() {
+				totalTiles.setText(String.format("%07d", event.getNewValue())); 
+		    }
+		});;
+	}
+
+	private void databaseClosedEvent(final PropertyChangeEvent event) {
+		database.removePropertyChangeListener(databaseListener);
+    	setDataMode(DataMode.CLOSED);
+    	signalReadyToExit(DATABASE_CLOSED);
+	}
+
+	private void databaseOpenEvent(final PropertyChangeEvent event) {
+		setDataMode(DataMode.OPEN);
 	}	
 
     private void setDataMode(DataMode mode) {
-        switch (mode) {
-            case OPEN:
-                newDataFileMenuItem.setEnabled(false);
-                openDataFileMenuItem.setEnabled(false);
-                closeDataFileMenuItem.setEnabled(true);
-                saveDataFileMenuItem.setEnabled(true);
-                saveAsDataFileMenuItem.setEnabled(true);
-                
-                newDataFileButton.setEnabled(false);
-                openDataFileButton.setEnabled(false);
-                saveDataFileButton.setEnabled(true);
-                bofDataFileButton.setEnabled(true);
-                eofDataFileButton.setEnabled(true);
-                
-                closeDataFileButton.setEnabled(true);
-                closeDataFileButton.setSelected(false);
-                stopDataFileButton.setEnabled(true);
-                stopDataFileButton.setSelected(true);
-                replayDataFileButton.setEnabled(true);
-                replayDataFileButton.setSelected(false);
-                recordDataFileButton.setEnabled(true);
-                recordDataFileButton.setSelected(false);
-                break;
-            case CLOSED:
-                newDataFileMenuItem.setEnabled(true);
-                openDataFileMenuItem.setEnabled(true);
-                closeDataFileMenuItem.setEnabled(false);
-                saveDataFileMenuItem.setEnabled(false);
-                saveAsDataFileMenuItem.setEnabled(false);
-                
-                newDataFileButton.setEnabled(true);
-                openDataFileButton.setEnabled(true);
-                saveDataFileButton.setEnabled(false);
-                bofDataFileButton.setEnabled(false);
-                eofDataFileButton.setEnabled(false);
-                
-                closeDataFileButton.setEnabled(false);
-                closeDataFileButton.setSelected(false);
-                stopDataFileButton.setEnabled(false);
-                stopDataFileButton.setSelected(false);
-                replayDataFileButton.setEnabled(false);
-                replayDataFileButton.setSelected(false);
-                recordDataFileButton.setEnabled(false);
-                recordDataFileButton.setSelected(false);
-                
-                recordCountLabel.setText("");
-                recordPointerLabel.setText("");
-                logFileNameLabel.setText("");
-                break;
-            case STOP:
-                newDataFileMenuItem.setEnabled(false);
-                openDataFileMenuItem.setEnabled(true);
-                closeDataFileMenuItem.setEnabled(true);
-                saveDataFileMenuItem.setEnabled(true);
-                saveAsDataFileMenuItem.setEnabled(true);
-                
-                newDataFileButton.setEnabled(false);
-                openDataFileButton.setEnabled(false);
-                saveDataFileButton.setEnabled(true);
-                bofDataFileButton.setEnabled(true);
-                eofDataFileButton.setEnabled(true);
-                
-                closeDataFileButton.setEnabled(true);
-                closeDataFileButton.setSelected(false);
-                stopDataFileButton.setEnabled(true);
-                stopDataFileButton.setSelected(true);
-                replayDataFileButton.setEnabled(true);
-                replayDataFileButton.setSelected(false);
-                recordDataFileButton.setEnabled(true);
-                recordDataFileButton.setSelected(false);
-                break;
-            case REPLAY:
-                newDataFileMenuItem.setEnabled(false);
-                openDataFileMenuItem.setEnabled(false);
-                closeDataFileMenuItem.setEnabled(true);
-                saveDataFileMenuItem.setEnabled(false);
-                saveAsDataFileMenuItem.setEnabled(false);
-                
-                newDataFileButton.setEnabled(false);
-                openDataFileButton.setEnabled(false);
-                saveDataFileButton.setEnabled(false);
-                bofDataFileButton.setEnabled(true);
-                eofDataFileButton.setEnabled(true);
-
-                closeDataFileButton.setEnabled(true);
-                closeDataFileButton.setSelected(false);
-                stopDataFileButton.setEnabled(true);
-                stopDataFileButton.setSelected(false);
-                replayDataFileButton.setEnabled(true);
-                replayDataFileButton.setSelected(true);
-                recordDataFileButton.setEnabled(false);
-                recordDataFileButton.setSelected(false);
-                break;
-            case RECORD:
-                newDataFileMenuItem.setEnabled(false);
-                openDataFileMenuItem.setEnabled(false);
-                closeDataFileMenuItem.setEnabled(true);
-                saveDataFileMenuItem.setEnabled(true);
-                saveAsDataFileMenuItem.setEnabled(true);
-                
-                newDataFileButton.setEnabled(false);
-                openDataFileButton.setEnabled(false);
-                saveDataFileButton.setEnabled(true);
-                bofDataFileButton.setEnabled(false);
-                eofDataFileButton.setEnabled(false);
-
-                closeDataFileButton.setEnabled(true);
-                closeDataFileButton.setSelected(false);
-                stopDataFileButton.setEnabled(true);
-                stopDataFileButton.setSelected(false);
-                replayDataFileButton.setEnabled(false);
-                replayDataFileButton.setSelected(false);
-                recordDataFileButton.setEnabled(true);
-                recordDataFileButton.setSelected(true);  
-                break;
-            case PAUSE:
-                newDataFileMenuItem.setEnabled(false);
-                openDataFileMenuItem.setEnabled(false);
-                closeDataFileMenuItem.setEnabled(true);
-                saveDataFileMenuItem.setEnabled(true);
-                saveAsDataFileMenuItem.setEnabled(true);
-                
-                newDataFileButton.setEnabled(false);
-                openDataFileButton.setEnabled(false);
-                saveDataFileButton.setEnabled(true);
-                bofDataFileButton.setEnabled(true);
-                eofDataFileButton.setEnabled(true);
-
-                closeDataFileButton.setEnabled(true);
-                closeDataFileButton.setSelected(false);
-                stopDataFileButton.setEnabled(true);
-                stopDataFileButton.setSelected(false);
-                replayDataFileButton.setEnabled(true);
-                replayDataFileButton.setSelected(false);
-                recordDataFileButton.setEnabled(false);
-                recordDataFileButton.setSelected(false);   
-                break;
-            case REPLAY_COMPLETE:
-                newDataFileMenuItem.setEnabled(false);
-                openDataFileMenuItem.setEnabled(false);
-                closeDataFileMenuItem.setEnabled(true);
-                saveDataFileMenuItem.setEnabled(true);
-                saveAsDataFileMenuItem.setEnabled(true);
-                
-                newDataFileButton.setEnabled(false);
-                openDataFileButton.setEnabled(false);
-                saveDataFileButton.setEnabled(true);
-                bofDataFileButton.setEnabled(true);
-                eofDataFileButton.setEnabled(true);
-                
-                closeDataFileButton.setEnabled(true);
-                stopDataFileButton.setEnabled(true);
-                replayDataFileButton.setEnabled(false);
-                recordDataFileButton.setEnabled(true);
-                
-                closeDataFileButton.setEnabled(true);
-                closeDataFileButton.setSelected(false);
-                stopDataFileButton.setEnabled(true);
-                stopDataFileButton.setSelected(false);
-                replayDataFileButton.setEnabled(true);
-                replayDataFileButton.setSelected(false);
-                recordDataFileButton.setEnabled(false);
-                recordDataFileButton.setSelected(false);
-                break;
-        }
-        dataMode = mode;
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+		    @Override
+		    public void run() {
+		        switch (mode) {
+		            case OPEN:
+		                newDataFileMenuItem.setEnabled(false);
+		                openDataFileMenuItem.setEnabled(false);
+		                closeDataFileMenuItem.setEnabled(true);
+		                saveDataFileMenuItem.setEnabled(true);
+		                saveAsDataFileMenuItem.setEnabled(true);
+		                
+		                newDataFileButton.setEnabled(false);
+		                openDataFileButton.setEnabled(false);
+		                saveDataFileButton.setEnabled(true);
+		                
+		                closeDataFileButton.setEnabled(true);
+		                closeDataFileButton.setSelected(false);
+		                stopDataFileButton.setEnabled(true);
+		                stopDataFileButton.setSelected(true);
+		                recordDataFileButton.setEnabled(true);
+		                recordDataFileButton.setSelected(false);
+		                break;
+		            case CLOSED:
+		            	map.deleteAllTestTiles();
+		            	learnMode = false;
+		            	
+		                newDataFileMenuItem.setEnabled(true);
+		                openDataFileMenuItem.setEnabled(true);
+		                closeDataFileMenuItem.setEnabled(false);
+		                saveDataFileMenuItem.setEnabled(false);
+		                saveAsDataFileMenuItem.setEnabled(false);
+		                
+		                newDataFileButton.setEnabled(true);
+		                openDataFileButton.setEnabled(true);
+		                saveDataFileButton.setEnabled(false);
+		                
+		                learnModeButton.setSelected(false);
+		                openDataFileButton.setSelected(false);
+		                newDataFileButton.setSelected(false);
+		                closeDataFileButton.setEnabled(false);
+		                closeDataFileButton.setSelected(false);
+		                stopDataFileButton.setEnabled(false);
+		                stopDataFileButton.setSelected(false);
+		                recordDataFileButton.setEnabled(false);
+		                recordDataFileButton.setSelected(false);
+		                
+		                minMeasurementsPerTile.setText(""); 
+		                maxMeasurementsPerTile.setText(""); 
+		                measurementsThisTile.setText(""); 
+		                measurementPeriod.setText(""); 
+		                tilesCompleted.setText(""); 
+		                totalTiles.setText(""); 
+		                recordCountLabel.setText(""); 
+		                logFileNameLabel.setText(""); 
+		                break;
+		            case STOP:
+		                newDataFileMenuItem.setEnabled(false);
+		                openDataFileMenuItem.setEnabled(true);
+		                closeDataFileMenuItem.setEnabled(true);
+		                saveDataFileMenuItem.setEnabled(true);
+		                saveAsDataFileMenuItem.setEnabled(true);
+		                
+		                newDataFileButton.setEnabled(false);
+		                openDataFileButton.setEnabled(false);
+		                saveDataFileButton.setEnabled(true);
+		                
+		                closeDataFileButton.setEnabled(true);
+		                closeDataFileButton.setSelected(false);
+		                stopDataFileButton.setEnabled(true);
+		                stopDataFileButton.setSelected(true);
+		                recordDataFileButton.setEnabled(true);
+		                recordDataFileButton.setSelected(false);
+		                break;
+		            case RECORD:
+		                newDataFileMenuItem.setEnabled(false);
+		                openDataFileMenuItem.setEnabled(false);
+		                closeDataFileMenuItem.setEnabled(true);
+		                saveDataFileMenuItem.setEnabled(true);
+		                saveAsDataFileMenuItem.setEnabled(true);
+		                
+		                newDataFileButton.setEnabled(false);
+		                openDataFileButton.setEnabled(false);
+		                saveDataFileButton.setEnabled(true);
+		
+		                closeDataFileButton.setEnabled(true);
+		                closeDataFileButton.setSelected(false);
+		                stopDataFileButton.setEnabled(true);
+		                stopDataFileButton.setSelected(false);
+		                recordDataFileButton.setEnabled(true);
+		                recordDataFileButton.setSelected(true);  
+		                break;
+		            case RESTORE_COMPLETE:
+		                newDataFileMenuItem.setEnabled(false);
+		                openDataFileMenuItem.setEnabled(false);
+		                closeDataFileMenuItem.setEnabled(true);
+		                saveDataFileMenuItem.setEnabled(true);
+		                saveAsDataFileMenuItem.setEnabled(true);
+		                
+		                newDataFileButton.setEnabled(false);
+		                openDataFileButton.setEnabled(false);
+		                saveDataFileButton.setEnabled(true);
+		                
+		                closeDataFileButton.setEnabled(true);
+		                stopDataFileButton.setEnabled(true);
+		                recordDataFileButton.setEnabled(true);
+		                
+		                closeDataFileButton.setEnabled(true);
+		                closeDataFileButton.setSelected(false);
+		                stopDataFileButton.setEnabled(true);
+		                stopDataFileButton.setSelected(false);
+		                recordDataFileButton.setEnabled(false);
+		                recordDataFileButton.setSelected(false);
+		                break;
+		        }
+		        dataMode = mode;
+		    }
+		});
     }
 
-    private void startTest() {
+    private void startDemo() {
+    	startStaticTest();
 	    final double TEST_SPEED_KPH = 300;
 	    final double TEST_HEADING = 0;	
 	    
-	    double distance = Vincenty.metersToDegrees(3000, TEST_HEADING, currentLonLat.y);
+	    double distance = Vincenty.metersToDegrees(3000, TEST_HEADING, serialGPSComponent.getGPSInterface().getPosition().y);
 	    
 	    Point.Double p1 = new Point.Double(-83.23791 - (2*distance), 40.05074 + (4*distance));
 	    Point.Double p2 = new Point.Double(-83.23791 - (4*distance), 40.05074 + (8*distance));
@@ -4367,29 +4769,29 @@ public class Main extends JFrame implements JMapViewerEventListener {
         double k4 = RFPath.getFreeSpacePathLoss(dd, 100);
         
         long td = networkTime.getBestTimeInMillis();
-        processStaticMeasurement(new StaticMeasurement(p1, td, k1, TEST_HEADING, TEST_SPEED_KPH, alt, 100, 1));
-        processStaticMeasurement(new StaticMeasurement(p2, td, k2, TEST_HEADING, TEST_SPEED_KPH, alt, 100, 1));
+        processStaticMeasurement(new StaticMeasurement(logFileName, p1, td, k1, TEST_HEADING, TEST_SPEED_KPH, alt, 100, 1));
+        processStaticMeasurement(new StaticMeasurement(logFileName, p2, td, k2, TEST_HEADING, TEST_SPEED_KPH, alt, 100, 1));
         
         td = networkTime.getBestTimeInMillis();
-        processStaticMeasurement(new StaticMeasurement(p3, td, k3, TEST_HEADING, TEST_SPEED_KPH, alt, 100, 2));       
-        processStaticMeasurement(new StaticMeasurement(p4, td, k4, TEST_HEADING, TEST_SPEED_KPH, alt, 100, 2)); 
+        processStaticMeasurement(new StaticMeasurement(logFileName, p3, td, k3, TEST_HEADING, TEST_SPEED_KPH, alt, 100, 2));       
+        processStaticMeasurement(new StaticMeasurement(logFileName, p4, td, k4, TEST_HEADING, TEST_SPEED_KPH, alt, 100, 2)); 
         
         map.setCenterLonLat(TEST_POINT);
-        doProcessStaticMeasurements = true;
+        processStaticMeasurements = true;
 	}
 
     private int getNumberOfFlights(List<StaticMeasurement> sml) {
     	int lastUnit = 0;
-    	for (StaticMeasurement sm : staticList) {
-    		lastUnit = Math.max(sm.unit, lastUnit);
+    	for (StaticMeasurement sm : sml) {
+    		lastUnit = Math.max(sm.getUnit(), lastUnit);
 		}
     	return lastUnit;
     }
 
     private void compileStaticMeasurements() {
-    	if (staticList.isEmpty()) return;
+    	if (database.getStaticRecordList().isEmpty()) return;
     	
-    	int numberOfFlights = getNumberOfFlights(staticList);
+    	int numberOfFlights = getNumberOfFlights(database.getStaticRecordList());
     	double maxCatt = staticTestSettings.getMaxCatt();
     	double minCatt = 0;
     	
@@ -4399,8 +4801,8 @@ public class Main extends JFrame implements JMapViewerEventListener {
 
     		List<StaticMeasurement> sl = new ArrayList<>();
     		
-    		for (StaticMeasurement sm : staticList) {
-    			if (sm.unit == z+1) sl.add(sm);
+    		for (StaticMeasurement sm : database.getStaticRecordList()) {
+    			if (sm.getUnit() == z+1) sl.add(sm);
     		}
     		
     		int slss = 0;
@@ -4418,7 +4820,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
     		if (!sl.isEmpty() && sl.size() > 1) {
 				for (int i = sl.size() - 1; i > sl.size() - add; i--) {
 		    		for (int n = i - 1; n >= 0; n--) {
-		    			if (sl.get(n).dBm < sl.get(i).dBm) {
+		    			if (sl.get(n).getdBm() < sl.get(i).getdBm()) {
 		    				ConicSection cone = new ConicSection(sl.get(n), sl.get(i), z);
 		    				if (cone.getConicAngleToTarget() >= minCatt && cone.getConicAngleToTarget() <= maxCatt) {
 		    					conicSectionList.add(cone);
@@ -4436,7 +4838,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
     		}
     	}
         doInterceptListUpdate(conicSectionList, conicSectionListStartSize);
-        doProcessStaticMeasurements = false;
+        processStaticMeasurements = false;
     }
 
     private void doInterceptListUpdate(List<ConicSection> list, final int startSize) {
@@ -4447,7 +4849,7 @@ public class Main extends JFrame implements JMapViewerEventListener {
     	intersectListUpdate.addPropertyChangeListener(new PropertyChangeListener() {
 			@Override
 			public void propertyChange(final PropertyChangeEvent event) {
-				if ("INTERSECT_LIST_COMPLETE".equals(event.getPropertyName())) {
+				if ("INTERSECT_LIST_COMPLETE".equals(event.getPropertyName())) { 
 					intersectListUpdatePropertyChangeListenerEvent(event);
 				}
 			}
@@ -4492,16 +4894,18 @@ public class Main extends JFrame implements JMapViewerEventListener {
         }
     }
     
-    private void mapPanelLeftMouseButtonClicked(final MouseEvent event) {
-        if (!serialGPSComponent.isGpsOnLine() && map.isShowGrid() && isCoverageTestModeActive) {
+    void mapPanelLeftMouseButtonClicked(final MouseEvent event) {
+        if (!serialGPSComponent.isGpsOnLine() && map.isShowGrid() && coverageTestActive && !learnMode) {
             periodTimerTimeOut = false;
             periodTimerHalt = false;
             periodTimer.start();
-            isRecord = true;
             processPositionInformation(PositionSource.MANUAL, map.getMouseCoordinates());
         }
+        if (!coverageTestActive && learnMode && !learnModeHold) {
+        	createBlankTestTile(map.getMouseCoordinates());
+        }
     }
-      
+
     private int getRdfQuality(final GPSInterface.RdfQuality rdfqual) {
     	switch (rdfqual) {
 		    case RDF_QUAL_1: return 1;
@@ -4547,15 +4951,14 @@ public class Main extends JFrame implements JMapViewerEventListener {
         	public void run() {
                 synchronized (this) {
                     if (!readyToExit) {
-                        isVMShuttingDown = true;
                         try {
                             wait(5000);
                         } catch (InterruptedException ex) {
                         	ex.printStackTrace();
                         } 
                         if (!readyToExit) {
-                            System.err.println("Ungraceful Shutdown : " + shutdownMask);
-                            log.log(Level.SEVERE, "Ungraceful Shutdown = " + shutdownMask, new Exception());
+                            System.err.println("Ungraceful Shutdown : " + shutdownMask); 
+                            log.log(Level.SEVERE, "Ungraceful Shutdown = " + shutdownMask, new Exception()); 
                         } 
                     }
                 }
@@ -4576,35 +4979,51 @@ public class Main extends JFrame implements JMapViewerEventListener {
     	try {
 			systemPref.clear();
 		} catch (BackingStoreException ex) {
-			ex.printStackTrace();
 			reportException(ex);
 		}
     }
     
-    private void updateZoomParameters(int zoom) {
+    void updateZoomParameters(int zoom) {
+    	
     }
     
-    private void disableZoomIn(boolean disabled) {
-    	zoomInButton.setEnabled(!disabled);
+    void disableZoomIn(boolean disabled) {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	zoomInButton.setEnabled(!disabled);
+            }
+    	});
     }
     
-    private void disableZoomOut(boolean disabled) {
-    	zoomOutButton.setEnabled(!disabled);
+    void disableZoomOut(boolean disabled) {
+    	invokeLaterInDispatchThreadIfNeeded(new Runnable() {
+            @Override
+            public void run() {
+            	zoomOutButton.setEnabled(!disabled);
+            }
+    	});
+    }
+
+    private static void invokeLaterInDispatchThreadIfNeeded(Runnable runnable) {
+        if (EventQueue.isDispatchThread()) {
+            runnable.run();
+        } else {
+            SwingUtilities.invokeLater(runnable);
+        }
     }
     
-    @Override
-    public void processCommand(JMVCommandEvent command) {
-        if (command.getCommand().equals(JMVCommandEvent.COMMAND.ZOOM)) {
-        	updateZoomParameters((int) command.getNewValue());
-        }
-        if (command.getCommand().equals(JMVCommandEvent.COMMAND.MOVE)) {
-            
-        }
-        if (command.getCommand().equals(JMVCommandEvent.COMMAND.ZOOM_IN_DISABLED)) {
-            disableZoomIn((boolean) command.getNewValue());
-        }
-        if (command.getCommand().equals(JMVCommandEvent.COMMAND.ZOOM_OUT_DISABLED)) {
-            disableZoomOut((boolean) command.getNewValue());
+    public static void invokeAndWaitInDispatchThreadIfNeeded(Runnable runnable) {
+        if (EventQueue.isDispatchThread()) {
+            runnable.run();
+        } else {
+            try {
+				SwingUtilities.invokeAndWait(runnable);
+			} catch (InvocationTargetException e) {
+				e.printStackTrace();
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
         }
     }
 }

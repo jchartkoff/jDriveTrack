@@ -1,0 +1,68 @@
+Feb 02, 2016 11:04:43 PM jdrivetrack.DerbyDatabase reportException
+WARNING: NullPointerException
+java.lang.NullPointerException
+	at jdrivetrack.DerbyDatabase.isTableCreated(DerbyDatabase.java:431)
+	at jdrivetrack.DerbyDatabase.access$18(DerbyDatabase.java:428)
+	at jdrivetrack.DerbyDatabase$Database.run(DerbyDatabase.java:412)
+	at java.lang.Thread.run(Unknown Source)
+
+Feb 02, 2016 11:04:43 PM jdrivetrack.DerbyDatabase reportException
+WARNING: Exception
+java.sql.SQLSyntaxErrorException: Syntax error: Encountered "ASC" at line 1, column 48.
+	at org.apache.derby.impl.jdbc.SQLExceptionFactory.getSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.Util.generateCsSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.TransactionResourceImpl.wrapInSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.TransactionResourceImpl.handleException(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedConnection.handleException(Unknown Source)
+	at org.apache.derby.impl.jdbc.ConnectionChild.handleException(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedPreparedStatement.<init>(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedPreparedStatement42.<init>(Unknown Source)
+	at org.apache.derby.jdbc.Driver42.newEmbedPreparedStatement(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedConnection.prepareStatement(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedConnection.prepareStatement(Unknown Source)
+	at jdrivetrack.DerbyDatabase$CreateTables.run(DerbyDatabase.java:308)
+	at java.lang.Thread.run(Unknown Source)
+Caused by: ERROR 42X01: Syntax error: Encountered "ASC" at line 1, column 48.
+	at org.apache.derby.iapi.error.StandardException.newException(Unknown Source)
+	at org.apache.derby.iapi.error.StandardException.newException(Unknown Source)
+	at org.apache.derby.impl.sql.compile.ParserImpl.parseStatementOrSearchCondition(Unknown Source)
+	at org.apache.derby.impl.sql.compile.ParserImpl.parseStatement(Unknown Source)
+	at org.apache.derby.impl.sql.GenericStatement.prepMinion(Unknown Source)
+	at org.apache.derby.impl.sql.GenericStatement.prepare(Unknown Source)
+	at org.apache.derby.impl.sql.conn.GenericLanguageConnectionContext.prepareInternalStatement(Unknown Source)
+	... 7 more
+
+Feb 02, 2016 11:13:25 PM jdrivetrack.DerbyDatabase reportException
+WARNING: NullPointerException
+java.lang.NullPointerException
+	at jdrivetrack.DerbyDatabase.isTableCreated(DerbyDatabase.java:430)
+	at jdrivetrack.DerbyDatabase.access$18(DerbyDatabase.java:427)
+	at jdrivetrack.DerbyDatabase$Database.run(DerbyDatabase.java:411)
+	at java.lang.Thread.run(Unknown Source)
+
+Feb 02, 2016 11:13:26 PM jdrivetrack.DerbyDatabase reportException
+WARNING: Exception
+java.sql.SQLSyntaxErrorException: Syntax error: Encountered "ASC" at line 1, column 48.
+	at org.apache.derby.impl.jdbc.SQLExceptionFactory.getSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.Util.generateCsSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.TransactionResourceImpl.wrapInSQLException(Unknown Source)
+	at org.apache.derby.impl.jdbc.TransactionResourceImpl.handleException(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedConnection.handleException(Unknown Source)
+	at org.apache.derby.impl.jdbc.ConnectionChild.handleException(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedPreparedStatement.<init>(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedPreparedStatement42.<init>(Unknown Source)
+	at org.apache.derby.jdbc.Driver42.newEmbedPreparedStatement(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedConnection.prepareStatement(Unknown Source)
+	at org.apache.derby.impl.jdbc.EmbedConnection.prepareStatement(Unknown Source)
+	at jdrivetrack.DerbyDatabase$CreateTables.run(DerbyDatabase.java:307)
+	at java.lang.Thread.run(Unknown Source)
+Caused by: ERROR 42X01: Syntax error: Encountered "ASC" at line 1, column 48.
+	at org.apache.derby.iapi.error.StandardException.newException(Unknown Source)
+	at org.apache.derby.iapi.error.StandardException.newException(Unknown Source)
+	at org.apache.derby.impl.sql.compile.ParserImpl.parseStatementOrSearchCondition(Unknown Source)
+	at org.apache.derby.impl.sql.compile.ParserImpl.parseStatement(Unknown Source)
+	at org.apache.derby.impl.sql.GenericStatement.prepMinion(Unknown Source)
+	at org.apache.derby.impl.sql.GenericStatement.prepare(Unknown Source)
+	at org.apache.derby.impl.sql.conn.GenericLanguageConnectionContext.prepareInternalStatement(Unknown Source)
+	... 7 more
+

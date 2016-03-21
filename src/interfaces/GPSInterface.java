@@ -138,4 +138,6 @@ public interface GPSInterface {
 	String[] getAvailableBaudRates();
 
 	boolean serialParametersFixed();
+
+	void enableContinuousUpdate(boolean continuousUpdate);
 }

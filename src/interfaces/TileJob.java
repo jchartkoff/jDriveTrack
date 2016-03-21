@@ -1,7 +1,7 @@
 // License: GPL. For details, see Readme.txt file.
 package interfaces;
 
-import jdrivetrack.Tile;
+import types.Tile;
 
 /**
  * Interface for implementing a tile loading job. Tiles are usually loaded via HTTP

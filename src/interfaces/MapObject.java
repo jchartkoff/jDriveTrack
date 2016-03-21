@@ -1,12 +1,11 @@
-// License: GPL. For details, see Readme.txt file.
 package interfaces;
 
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Stroke;
 
-import jdrivetrack.Layer;
-import jdrivetrack.Style;
+import types.Layer;
+import types.Style;
 
 
 public interface MapObject {
@@ -28,6 +27,8 @@ public interface MapObject {
     Font getFont();
 
     String getName();
+    
+    int getID();
 
     boolean isVisible();
 }

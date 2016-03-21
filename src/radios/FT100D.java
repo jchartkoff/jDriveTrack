@@ -1,6 +1,7 @@
 package radios;
 
 import jssc.SerialPort;
+import types.EmissionDesignator;
 
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
@@ -14,7 +15,6 @@ import java.util.concurrent.TimeUnit;
 
 import jdrivetrack.Calibrate;
 import jdrivetrack.CalibrationDataObject;
-import jdrivetrack.EmissionDesignator;
 import jdrivetrack.Utility;
 import interfaces.RadioInterface;
 

@@ -110,7 +110,7 @@ public class StaticTestSettings extends JDialog {
 	private JButton jccCancel;
 	private int colorIndex;
 	
-	private Preferences userPref = Preferences.userRoot().node(this.getClass().getName());
+	private Preferences userPref = Preferences.userRoot().node("jdrivetrack/prefs/StaticTestSettings");
 	
 	public StaticTestSettings() {
 		getSettingsFromRegistry();
